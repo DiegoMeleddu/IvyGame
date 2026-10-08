@@ -1,0 +1,23 @@
+# ===== Folder Unreal =====
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# ===== regenerate .uproject =====
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# ===== File system =====
+Thumbs.db
+.DS_Store
