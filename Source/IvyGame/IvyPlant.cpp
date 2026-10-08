@@ -1,5 +1,4 @@
-// IvyPlant.cpp
-#include "IvyPlant.h"
+﻿#include "IvyPlant.h"
 #include "IvyGrowthComponent.h"
 #include "IvyTypes.h"
 #include "ProceduralMeshComponent.h"
@@ -310,7 +309,6 @@ void AIvyPlant::BuildBranch(int32 BranchId)
 }
 
 // ------------------------------------------------------------------ Leaves
-
 bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, float& OutRandom) const
 {
 	const TArray<FIvyNode>& Nodes = Growth->GetNodes();
@@ -321,25 +319,72 @@ bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, 
 		return false;
 	}
 
+	// Random deterministico per nodo: undo e reset ricreano le stesse foglie
 	const int32 Seed = (Growth->Settings ? Growth->Settings->RandomSeed : 0) + NodeIndex * 196613;
 	FRandomStream Rand(Seed);
 
-	// Alternate leaf side along the stem
-	const float Side = ((NodeIndex / LeafEveryNNodes) % 2 == 0) ? 1.f : -1.f;
-	const float YawDeg = Side * LeafSideAngle + Rand.FRandRange(-LeafAngleJitter, LeafAngleJitter);
-
-	const FVector LeafDir = FQuat(Node.Normal, FMath::DegreesToRadians(YawDeg)).RotateVector(Node.Tangent);
-	const FVector LeafX = FVector::VectorPlaneProject(LeafDir, Node.Normal).GetSafeNormal();
-	if (LeafX.IsNearlyZero())
+	// 1) Ogni tanto la foglia manca
+	if (Rand.FRand() < LeafSkipChance)
 	{
 		return false;
 	}
 
-	// Leaf mesh convention: pivot at the base, facing +Z, pointing +X
-	const FRotator Rotation = FRotationMatrix::MakeFromXZ(LeafX, Node.Normal).Rotator();
+	const FVector Tangent = FVector::VectorPlaneProject(Node.Tangent, Node.Normal).GetSafeNormal();
+	if (Tangent.IsNearlyZero())
+	{
+		return false;
+	}
+
+	// 2) Lati alternati, con qualche ripetizione sullo stesso lato
+	float Side = ((NodeIndex / LeafEveryNNodes) % 2 == 0) ? 1.f : -1.f;
+	if (Rand.FRand() < LeafSideFlipChance)
+	{
+		Side = -Side;
+	}
+
+	// 3) Spaziatura irregolare: la base scivola verso il nodo precedente
+	const FIvyNode& Parent = Nodes[Node.Parent];
+	const float Slide = Rand.FRandRange(0.f, LeafSpacingJitter);
+	const FVector StemPoint = FMath::Lerp(Node.Location, Parent.Location, Slide);
+
+	// 4) Picciolo con angolo e lunghezza variabili
+	const float PetioleYaw = Side * (LeafSideAngle + Rand.FRandRange(-LeafAngleJitter, LeafAngleJitter));
+	const FVector PetioleDir = FQuat(Node.Normal, FMath::DegreesToRadians(PetioleYaw)).RotateVector(Tangent);
+	const float PetioleLength = LeafPetioleLength * Rand.FRandRange(1.f - LeafPetioleJitter, 1.f + LeafPetioleJitter);
+
+	// 5) Lamina: ruota verso la crescita, con una variazione propria
+	const float BladeYaw = PetioleYaw - Side * LeafBladeTurn + Rand.FRandRange(-LeafBladeJitter, LeafBladeJitter);
+	FVector BladeDir = FQuat(Node.Normal, FMath::DegreesToRadians(BladeYaw)).RotateVector(Tangent);
+
+	// 6) Gravità (sul pavimento non ha effetto)
+	const FVector Down = FVector::VectorPlaneProject(FVector::DownVector, Node.Normal);
+	if (Down.SizeSquared() > 0.01)
+	{
+		BladeDir = FMath::Lerp(BladeDir, Down.GetSafeNormal(), LeafDroop);
+	}
+	BladeDir = FVector::VectorPlaneProject(BladeDir, Node.Normal).GetSafeNormal();
+	if (BladeDir.IsNearlyZero())
+	{
+		return false;
+	}
+
 	const float Scale = Rand.FRandRange(LeafScaleRange.X, LeafScaleRange.Y);
 
-	OutTransform = FTransform(Rotation, Node.Location + Node.Normal * LeafLift, FVector(Scale));
+	// Livelli: foglie vicine a distanze diverse dal muro → niente z-fighting
+	const int32 Layer = NodeIndex % FMath::Max(1, LeafLayerCount);
+	const float Lift = LeafLift + Layer * LeafLayerStep;
+
+	const FVector Location = StemPoint + PetioleDir * PetioleLength + Node.Normal * Lift;
+
+	// Inclinazione: la punta si alza leggermente dal muro, così le foglie non sono complanari
+	const FVector BladeRight = FVector::CrossProduct(Node.Normal, BladeDir);
+	const float TiltDeg = Rand.FRandRange(0.f, LeafTiltJitter);
+	const FVector TiltedNormal = FQuat(BladeRight, FMath::DegreesToRadians(-TiltDeg)).RotateVector(Node.Normal);
+	const FVector TiltedBlade = FQuat(BladeRight, FMath::DegreesToRadians(-TiltDeg)).RotateVector(BladeDir);
+
+	const FRotator Rotation = FRotationMatrix::MakeFromXZ(TiltedBlade, TiltedNormal).Rotator();
+
+	OutTransform = FTransform(Rotation, Location, FVector(Scale));
 	OutRandom = Rand.FRand();
 	return true;
 }

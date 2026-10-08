@@ -1,4 +1,3 @@
-// IvyPlant.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -84,6 +83,47 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves", meta = (Units = "cm"))
 	float LeafLift = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves", meta = (ClampMin = "0", Units = "cm"))
+	float LeafPetioleLength = 3.f;
+
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves", meta = (Units = "deg"))
+	float LeafBladeTurn = 20.f;
+
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves", meta = (ClampMin = "0", ClampMax = "1"))
+	float LeafDroop = 0.35f;
+
+	/** Probabilità che un nodo non abbia la foglia. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
+	float LeafSkipChance = 0.15f;
+
+	/** Probabilità che una foglia stia sullo stesso lato della precedente. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
+	float LeafSideFlipChance = 0.12f;
+
+	/** 0 = foglia esattamente sul nodo, 1 = può scivolare fino al nodo precedente. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
+	float LeafSpacingJitter = 0.7f;
+
+	/** Variazione della lunghezza del picciolo (0.3 = ±30%). */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
+	float LeafPetioleJitter = 0.35f;
+
+	/** Variazione casuale della direzione della lamina, indipendente dal picciolo. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", Units = "deg"))
+	float LeafBladeJitter = 12.f;
+
+	/** Distanza tra i livelli delle foglie: evita lo z-fighting tra foglie sovrapposte. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", Units = "cm"))
+	float LeafLayerStep = 0.25f;
+
+	/** Numero di livelli: le foglie vicine (indici consecutivi) finiscono su livelli diversi. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "1", ClampMax = "8"))
+	int32 LeafLayerCount = 4;
+
+	/** Inclinazione casuale della lamina rispetto al muro. */
+	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "30", Units = "deg"))
+	float LeafTiltJitter = 8.f;
 
 	// --- Misc ---
 	UPROPERTY(EditAnywhere, Category = "Ivy")
