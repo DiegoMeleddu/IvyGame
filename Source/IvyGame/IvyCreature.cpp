@@ -7,6 +7,7 @@
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
 
+
 static TAutoConsoleVariable<bool> CVarIvyDebugCreature(TEXT("ivy.DebugCreature"), false, TEXT("Disegna il percorso della creatura"));
 
 AIvyCreature::AIvyCreature()
