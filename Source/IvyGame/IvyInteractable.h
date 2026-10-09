@@ -1,36 +1,27 @@
 #pragma once
-
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "IvyTypes.h"
 #include "IvyInteractable.generated.h"
 
-UINTERFACE(MinimalAPI, Blueprintable)
-class UIvyInteractable : public UInterface
+UINTERFACE(BlueprintType)
+class IVYGAME_API UIvyInteractable : public UInterface
 {
-	GENERATED_BODY()
-}; 
-
-/**
- * Implemented in Blueprint by puzzle objects.
- * For collision: IvyInteract = Overlap to receive OnIvyGrowth,
- * IvyGrow = Block to receive OnIvyBlocked.
- */
+    GENERATED_BODY()
+};
 
 class IVYGAME_API IIvyInteractable
 {
-	GENERATED_BODY()
-
+    GENERATED_BODY()
 public:
-	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
-	void OnIvyGrowth(FVector NodeLocation, FVector GrowDirection);
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Ivy")
+    void OnIvyGrowth(const FVector& Location, const FVector& GrowthDirection, int32 NodeIndex);
 
-	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
-	bool OnIvyBlocked(FVector HitLocation, FVector PushDirection);
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Ivy")
+    bool OnIvyBlocked(const FVector& Location, const FVector& GrowthDirection);
 
-	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
-	FIvySavedState IvySaveState();
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Ivy")
+    void IvySaveState();
 
-	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
-	void IvyRestoreState(const FIvySavedState& State);
+    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Ivy")
+    void IvyRestoreState();
 };

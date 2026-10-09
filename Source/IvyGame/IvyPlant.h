@@ -10,6 +10,7 @@ class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
+class UIvyGraphComponent;
 
 /**
  * Ivy rendering actor.
@@ -27,6 +28,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	UIvyGrowthComponent* GetGrowth() const { return Growth; }
+	UFUNCTION(BlueprintPure, Category = "Ivy") 
+	UIvyGraphComponent* GetGraph() const { return Graph; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -36,6 +39,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UIvyGrowthComponent> Growth;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) 
+	TObjectPtr<UIvyGraphComponent> Graph;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UProceduralMeshComponent> StemMesh;

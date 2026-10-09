@@ -7,6 +7,7 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Engine/World.h"
+#include "IvyGraphComponent.h"
 
 namespace
 {
@@ -23,6 +24,7 @@ AIvyPlant::AIvyPlant()
 	RootComponent = SceneRoot;
 
 	Growth = CreateDefaultSubobject<UIvyGrowthComponent>(TEXT("Growth"));
+	Graph = CreateDefaultSubobject<UIvyGraphComponent>(TEXT("Graph"));
 
 	StemMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("StemMesh"));
 	StemMesh->SetupAttachment(SceneRoot);
