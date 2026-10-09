@@ -44,7 +44,8 @@ protected:
     UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> RootComp;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> Mesh;
 
-    UPROPERTY(EditInstanceOnly, Category = "Creature") TObjectPtr<AActor> GoalActor;
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Creature") TObjectPtr<AActor> GoalActor;
+
     UPROPERTY(EditAnywhere, Category = "Creature") float Speed = 60.f;          // cm/s
     UPROPERTY(EditAnywhere, Category = "Creature") float HeightOffset = 3.f;    // distanza dal fusto
     UPROPERTY(EditAnywhere, Category = "Creature") float MountRadius = 40.f;    // distanza per salire sull'edera
@@ -72,8 +73,10 @@ private:
     void ApplyTransform(float DeltaSeconds);
     void SetState(EIvyCreatureState NewState);
 
-    UPROPERTY() TObjectPtr<UIvyGraphComponent> Graph;
-    UPROPERTY() TObjectPtr<UIvyGrowthComponent> Growth;
+    UPROPERTY() 
+    TObjectPtr<UIvyGraphComponent> Graph;
+    UPROPERTY() 
+    TObjectPtr<UIvyGrowthComponent> Growth;
 
     EIvyCreatureState State = EIvyCreatureState::OffIvy;
     TArray<int32> Path;
