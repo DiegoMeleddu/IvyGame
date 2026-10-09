@@ -227,34 +227,43 @@ void AIvyCreature::SetState(EIvyCreatureState NewState)
 }
 
 // ---------- Undo ----------
-
-void AIvyCreature::IvySaveState_Implementation()
+// Layout di FIvySavedState.Floats per la creatura
+namespace IvyCreatureSave
 {
-    FCreatureSnapshot S;
-    S.Pos = CurrentPos;
-    S.Up = CurrentUp;
-    S.Rot = GetActorQuat();
-    S.Node = CurrentNode;
-    S.State = State;
-    History.Add(S);
+    constexpr int32 UpX = 0, UpY = 1, UpZ = 2, Node = 3, State = 4, Count = 5;
 }
 
-void AIvyCreature::IvyRestoreState_Implementation()
+FIvySavedState AIvyCreature::IvySaveState_Implementation()
 {
-    if (History.IsEmpty()) return;
-    const FCreatureSnapshot S = History.Pop();
+    FIvySavedState S;
+    S.Transform = GetActorTransform();
+    S.Floats.SetNum(IvyCreatureSave::Count);
+    S.Floats[IvyCreatureSave::UpX] = static_cast<float>(CurrentUp.X);
+    S.Floats[IvyCreatureSave::UpY] = static_cast<float>(CurrentUp.Y);
+    S.Floats[IvyCreatureSave::UpZ] = static_cast<float>(CurrentUp.Z);
+    S.Floats[IvyCreatureSave::Node] = static_cast<float>(CurrentNode);
+    S.Floats[IvyCreatureSave::State] = static_cast<float>(static_cast<uint8>(State));
+    return S;
+}
 
-    CurrentPos = S.Pos;
-    CurrentUp = S.Up;
-    CurrentNode = S.Node;
+void AIvyCreature::IvyRestoreState_Implementation(const FIvySavedState& SavedState)
+{
+    const TArray<float>& F = SavedState.Floats;
+    if (F.Num() < IvyCreatureSave::Count) return;
+
+    CurrentPos = SavedState.Transform.GetLocation();
+    CurrentUp = FVector(F[IvyCreatureSave::UpX], F[IvyCreatureSave::UpY], F[IvyCreatureSave::UpZ]).GetSafeNormal();
+    CurrentNode = FMath::RoundToInt(F[IvyCreatureSave::Node]);
+    const EIvyCreatureState SavedCreatureState = static_cast<EIvyCreatureState>(FMath::RoundToInt(F[IvyCreatureSave::State]));
+
     Path.Reset();
     PathIndex = 0;
     SegStartPos = SegEndPos = CurrentPos;
     SegStartUp = SegEndUp = CurrentUp;
     SegAlpha = 1.f;
 
-    SetActorLocationAndRotation(CurrentPos, S.Rot);
+    SetActorTransform(SavedState.Transform);
     // Un percorso "in corso" non è più valido: lo ricalcolo dopo la ricostruzione del grafo
-    SetState(S.State == EIvyCreatureState::Moving ? EIvyCreatureState::Waiting : S.State);
+    SetState(SavedCreatureState == EIvyCreatureState::Moving ? EIvyCreatureState::Waiting : SavedCreatureState);
     bRepathPending = true;
 }

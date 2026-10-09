@@ -32,10 +32,11 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Creature") FOnCreatureStateChanged OnStateChanged;
 
     // IIvyInteractable: la creatura partecipa all'undo come ogni oggetto puzzle
-    virtual void OnIvyGrowth_Implementation(const FVector& Location, const FVector& GrowthDirection, int32 NodeIndex) override {}
+    // IIvyInteractable
+    virtual void OnIvyGrowth_Implementation(const FVector& Location, const FVector& GrowthDirection) override {}
     virtual bool OnIvyBlocked_Implementation(const FVector& Location, const FVector& GrowthDirection) override { return false; }
-    virtual void IvySaveState_Implementation() override;
-    virtual void IvyRestoreState_Implementation() override;
+    virtual FIvySavedState IvySaveState_Implementation() override;
+    virtual void IvyRestoreState_Implementation(const FIvySavedState& SavedState) override;
 
 protected:
     virtual void BeginPlay() override;
@@ -87,6 +88,4 @@ private:
 
     bool bRepathPending = true;
     float RepathCooldown = 0.f;
-
-    TArray<FCreatureSnapshot> History;
 };

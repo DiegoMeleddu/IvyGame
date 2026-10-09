@@ -109,11 +109,11 @@ void UIvyGraphComponent::GatherInRadius(const FVector& Point, float Radius, TArr
 
 bool UIvyGraphComponent::HasClearLine(const FIvyNode& A, const FIvyNode& B) const
 {
-    // I raise the points along the normal so they don't hit the wall they're on
+    // Sollevo i punti lungo la normale per non colpire il muro su cui stanno
     FCollisionQueryParams Q(SCENE_QUERY_STAT(IvyJunction), false, GetOwner());
     FHitResult Hit;
     return !GetWorld()->LineTraceSingleByChannel(Hit, A.Location + A.Normal * 4.f,
-        B.Location + B.Normal * 4.f, ECC_IvyGrow, Q);
+        B.Location + B.Normal * 4.f, ECC_GameTraceChannel1, Q); // IvyGrow
 }
 
 int32 UIvyGraphComponent::FindNearestNode(const FVector& Location, float MaxDistance) const
@@ -165,7 +165,7 @@ bool UIvyGraphComponent::FindPath(int32 Start, int32 Goal, TArray<int32>& OutPat
     TArray<FOpen> Open;
 
     G[Start] = 0.f;
-    Open.HeapPush({ Start, FVector::Dist(Nodes[Start].Location, GoalPos) }, Less);
+    Open.HeapPush({ Start, static_cast<float>(FVector::Dist(Nodes[Start].Location, GoalPos)) }, Less);
 
     while (Open.Num() > 0)
     {
@@ -184,13 +184,13 @@ bool UIvyGraphComponent::FindPath(int32 Start, int32 Goal, TArray<int32>& OutPat
         for (int32 Next : Adjacency[Current.Node])
         {
             if (Closed[Next]) continue;
-            const float NewG = G[Current.Node] + FVector::Dist(Nodes[Current.Node].Location, Nodes[Next].Location);
+            const float NewG = G[Current.Node] + static_cast<float>(FVector::Dist(Nodes[Current.Node].Location, Nodes[Next].Location));
             if (NewG < G[Next])
             {
                 G[Next] = NewG;
                 From[Next] = Current.Node;
                 // Euristica euclidea
-                Open.HeapPush({ Next, NewG + FVector::Dist(Nodes[Next].Location, GoalPos) }, Less);
+                Open.HeapPush({ Next, NewG + static_cast<float>(FVector::Dist(Nodes[Next].Location, GoalPos)) }, Less);
             }
         }
     }
