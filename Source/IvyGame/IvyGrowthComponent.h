@@ -9,6 +9,9 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnIvyNodeAdded, int32);
 DECLARE_MULTICAST_DELEGATE(FOnIvyRebuilt);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnIvyChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnIvySapChanged, float, CurrentSap, float, MaxSap);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIvyLightGrowthChanged, bool, bGrowingInLight);
+
+class UIvyLightSubsystem;
 
 UCLASS(ClassGroup = (Ivy), meta = (BlueprintSpawnableComponent))
 class IVYGAME_API UIvyGrowthComponent : public UActorComponent
@@ -59,6 +62,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	bool HasSapForStep() const;
 
+	// --- Luce ---
+/** True if the surface point is reached by a gameplay light (growth there is free). */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Light")
+	bool IsSurfaceLit(const FVector& Location, const FVector& Normal) const;
+
+	/** True while the last grown step was on a lit surface. */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Light")
+	bool IsGrowingInLight() const { return bGrowingInLight; }
+
 	/** Distanza (cm) che la pianta può ancora percorrere con la linfa attuale. -1 = illimitata. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	float GetRemainingGrowthDistance() const;
@@ -87,6 +99,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Ivy")
 	FOnIvySapChanged OnSapChanged;
 
+	UPROPERTY(BlueprintAssignable, Category = "Ivy")
+	FOnIvyLightGrowthChanged OnLightGrowthChanged;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -95,7 +110,8 @@ private:
 	void GrowTick();
 	bool GrowStep();
 	bool FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal);
-	void AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir);
+	void AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir, bool bLit);
+	void SetGrowingInLight(bool bInLight);
 	void NotifyInteractables(const FVector& Location, const FVector& Dir);
 	int32 FindStartNode(const FVector& Target, int32& OutBranch) const;
 	FIvySnapshot MakeSnapshot() const;
@@ -116,4 +132,9 @@ private:
 	FVector GrowTarget = FVector::ZeroVector;
 
 	FTimerHandle GrowTimer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UIvyLightSubsystem> LightSubsystem;
+
+	bool bGrowingInLight = false;
 };

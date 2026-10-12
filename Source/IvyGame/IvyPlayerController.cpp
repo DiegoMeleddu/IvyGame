@@ -108,7 +108,8 @@ void AIvyPlayerController::PlayerTick(float DeltaTime)
 	bCursorHit = GetHitResultUnderCursor(IvyChannels::Grow, false, CursorHit);
 
 	UIvyGrowthComponent* IvyComp = Ivy.Get();
-	const bool bCanGrow = bCursorHit && IvyComp && IvyComp->HasSapForStep() && UIvyGrowthComponent::IsClimbable(CursorHit);
+	const bool bCanGrow = bCursorHit && IvyComp && UIvyGrowthComponent::IsClimbable(CursorHit)
+		&& (IvyComp->HasSapForStep() || IvyComp->IsSurfaceLit(CursorHit.ImpactPoint, CursorHit.ImpactNormal));
 
 	if (bCursorHit && IvyComp && IvyComp->IsGrowing())
 	{

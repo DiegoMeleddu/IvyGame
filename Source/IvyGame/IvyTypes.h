@@ -40,6 +40,9 @@ struct FIvyNode
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	float BirthTime = 0.f;                       // World time birth
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
+	bool bLit = false;                           // grown on a lit surface (free step)
 };
 
 // A generic state that a puzzle object saves/restores for the undo function

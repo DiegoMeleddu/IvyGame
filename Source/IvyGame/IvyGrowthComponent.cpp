@@ -6,6 +6,7 @@
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "IvyLightSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogIvyGrowth, Log, All);
 
@@ -38,6 +39,8 @@ UIvyGrowthComponent::UIvyGrowthComponent()
 void UIvyGrowthComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	LightSubsystem = GetWorld()->GetSubsystem<UIvyLightSubsystem>();
 
 	if (!Settings)
 	{
@@ -149,6 +152,8 @@ void UIvyGrowthComponent::EndGesture()
 	PendingSnapshot = FIvySnapshot();
 	ActiveNode = INDEX_NONE;
 	ActiveBranch = INDEX_NONE;
+
+	SetGrowingInLight(false);
 }
 
 bool UIvyGrowthComponent::Undo()
@@ -187,6 +192,23 @@ float UIvyGrowthComponent::GetRemainingGrowthDistance() const
 	}
 	const float Steps = FMath::FloorToFloat(Sap / Settings->SapCostPerStep);
 	return Steps * Settings->StepLength;
+}
+
+// ------------------------------------------------------------------ Light
+
+bool UIvyGrowthComponent::IsSurfaceLit(const FVector& Location, const FVector& Normal) const
+{
+	return LightSubsystem && LightSubsystem->IsPointLit(Location, Normal, GetOwner());
+}
+
+void UIvyGrowthComponent::SetGrowingInLight(bool bInLight)
+{
+	if (bGrowingInLight == bInLight)
+	{
+		return;
+	}
+	bGrowingInLight = bInLight;
+	OnLightGrowthChanged.Broadcast(bGrowingInLight);
 }
 
 void UIvyGrowthComponent::AddSap(float Amount)
@@ -281,7 +303,7 @@ void UIvyGrowthComponent::GrowTick()
 
 bool UIvyGrowthComponent::GrowStep()
 {
-	if (!Nodes.IsValidIndex(ActiveNode) || !HasSapForStep())
+	if (!Nodes.IsValidIndex(ActiveNode))
 	{
 		return false;
 	}
@@ -343,7 +365,15 @@ bool UIvyGrowthComponent::GrowStep()
 	}
 	NewTangent.Normalize();
 
-	AddNode(From, NewLocation, NewNormal, NewTangent, Dir);
+	// 6) Light: a step on a lit surface is free, otherwise it needs sap
+	const bool bLit = IsSurfaceLit(NewLocation, NewNormal);
+	if (!bLit && !HasSapForStep())
+	{
+		SetGrowingInLight(false);
+		return false; // Out of sap and in the dark
+	}
+
+	AddNode(From, NewLocation, NewNormal, NewTangent, Dir, bLit);
 	return true;
 }
 
@@ -363,7 +393,8 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 		AActor* HitActor = Hit.GetActor();
 		if (ImplementsIvyInteractable(HitActor))
 		{
-			if (IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
+			// Pushing objects always requires sap, even in the light
+			if (HasSapForStep() && IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
 			{
 				bGestureDirty = true; // Mark state as changed
 			}
@@ -407,13 +438,14 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 	return false; // No surface found
 }
 
-void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir)
+void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir, bool bLit) 
 {
 	FIvyNode Node;
 	Node.Location = Location;
 	Node.Normal = Normal;
 	Node.Tangent = Tangent;
 	Node.Parent = ActiveNode;
+	Node.bLit = bLit;
 
 	const float StepDistance = static_cast<float>(FVector::Dist(From.Location, Location));
 	if (ActiveBranch == INDEX_NONE)
@@ -433,7 +465,11 @@ void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location,
 	BranchTips[ActiveBranch] = NewIndex;
 	ActiveNode = NewIndex;
 
-	Sap = FMath::Max(0.f, Sap - Settings->SapCostPerStep);
+	if (!bLit)
+	{
+		Sap = FMath::Max(0.f, Sap - Settings->SapCostPerStep);
+	}
+	SetGrowingInLight(bLit);
 
 #if ENABLE_DRAW_DEBUG
 	if (IsIvyDebugOn())
@@ -543,6 +579,7 @@ void UIvyGrowthComponent::ApplySnapshot(const FIvySnapshot& Snapshot)
 	OnRebuilt.Broadcast();
 	OnIvyChanged.Broadcast();
 	OnSapChanged.Broadcast(Sap, GetMaxSap());
+	SetGrowingInLight(false);
 }
 
 // Tracing
