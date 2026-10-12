@@ -29,7 +29,7 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
 	void OnCursorUpdated(bool bHit, FVector Location, FVector Normal, bool bCanGrow);
 
-	/** Chiamato quando la pianta del livello è stata trovata. Implementa in Blueprint per creare l'HUD. */
+	/** Called once the level plant has been found. Implement in Blueprint to create the HUD. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
 	void OnIvyReady(UIvyGrowthComponent* IvyGrowth);
 

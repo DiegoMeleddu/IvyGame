@@ -1,5 +1,6 @@
 ﻿#include "IvyPlant.h"
 #include "IvyGrowthComponent.h"
+#include "IvyGraphComponent.h"
 #include "IvyTypes.h"
 #include "ProceduralMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -7,7 +8,6 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Engine/World.h"
-#include "IvyGraphComponent.h"
 
 namespace
 {
@@ -35,7 +35,7 @@ AIvyPlant::AIvyPlant()
 	Leaves = CreateDefaultSubobject<UHierarchicalInstancedStaticMeshComponent>(TEXT("Leaves"));
 	Leaves->SetupAttachment(SceneRoot);
 	Leaves->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Leaves->NumCustomDataFloats = 2; // 0 = BirthTime, 1 = Random
+	Leaves->NumCustomDataFloats = 3; // 0 = BirthTime, 1 = Random, 2 = Lit (0/1)
 }
 
 void AIvyPlant::BeginPlay()
@@ -74,6 +74,7 @@ void AIvyPlant::Tick(float DeltaSeconds)
 		UKismetMaterialLibrary::SetScalarParameterValue(this, IvyMPC, IvyTimeParam, static_cast<float>(GetWorld()->GetTimeSeconds()));
 	}
 
+	// Animate each branch reveal toward its logical length
 	const float Speed = GetStemGrowSpeed();
 	for (int32 b = 0; b < BranchShownLength.Num(); ++b)
 	{
@@ -125,7 +126,7 @@ void AIvyPlant::HandleNodeAdded(int32 NodeIndex)
 	float Random = 0.f;
 	if (ComputeLeafTransform(NodeIndex, LeafTransform, Random))
 	{
-		AddLeaf(LeafTransform, Node.BirthTime, Random, true);
+		AddLeaf(LeafTransform, Node.BirthTime, Random, Node.bLit ? 1.f : 0.f, true);
 	}
 }
 
@@ -163,7 +164,7 @@ void AIvyPlant::HandleRebuilt()
 		float Random = 0.f;
 		if (ComputeLeafTransform(i, LeafTransform, Random))
 		{
-			AddLeaf(LeafTransform, Nodes[i].BirthTime, Random, false);
+			AddLeaf(LeafTransform, Nodes[i].BirthTime, Random, Nodes[i].bLit ? 1.f : 0.f, false);
 		}
 	}
 	Leaves->MarkRenderStateDirty();
@@ -239,12 +240,14 @@ void AIvyPlant::BuildBranch(int32 BranchId)
 	TArray<FVector2D> UVs;
 	TArray<FProcMeshTangent> Tangents;
 	TArray<int32> Triangles;
+	TArray<FLinearColor> Colors; // R = 1 where the node grew in light
 
 	Vertices.Reserve(Points.Num() * RingVerts);
 	Normals.Reserve(Points.Num() * RingVerts);
 	UVs.Reserve(Points.Num() * RingVerts);
 	Tangents.Reserve(Points.Num() * RingVerts);
 	Triangles.Reserve((Points.Num() - 1) * Segs * 6);
+	Colors.Reserve(Points.Num() * RingVerts);
 
 	for (int32 k = 0; k < Points.Num(); ++k)
 	{
@@ -273,6 +276,7 @@ void AIvyPlant::BuildBranch(int32 BranchId)
 
 		const FVector LocalCenter = ActorTransform.InverseTransformPosition(Node.Location);
 		const FVector LocalForward = ActorTransform.InverseTransformVectorNoScale(Forward);
+		const FLinearColor RingColor(Node.bLit ? 1.f : 0.f, 0.f, 0.f, 1.f);
 
 		for (int32 s = 0; s <= Segs; ++s)
 		{
@@ -284,6 +288,7 @@ void AIvyPlant::BuildBranch(int32 BranchId)
 			Normals.Add(LocalDir);
 			UVs.Add(FVector2D(Distance, static_cast<float>(s) / static_cast<float>(Segs))); // U = distance along the branch
 			Tangents.Add(FProcMeshTangent(LocalForward, false));
+			Colors.Add(RingColor);
 		}
 	}
 
@@ -302,7 +307,7 @@ void AIvyPlant::BuildBranch(int32 BranchId)
 	}
 
 	StemMesh->CreateMeshSection_LinearColor(BranchId, Vertices, Triangles, Normals, UVs,
-		TArray<FLinearColor>(), Tangents, /*bCreateCollision*/ false);
+		Colors, Tangents, /*bCreateCollision*/ false);
 
 	if (UMaterialInstanceDynamic* MID = GetOrCreateBranchMID(BranchId))
 	{
@@ -311,6 +316,7 @@ void AIvyPlant::BuildBranch(int32 BranchId)
 }
 
 // ------------------------------------------------------------------ Leaves
+
 bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, float& OutRandom) const
 {
 	const TArray<FIvyNode>& Nodes = Growth->GetNodes();
@@ -321,11 +327,11 @@ bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, 
 		return false;
 	}
 
-	// Random deterministico per nodo: undo e reset ricreano le stesse foglie
+	// Deterministic random per node: undo and reset recreate the same leaves
 	const int32 Seed = (Growth->Settings ? Growth->Settings->RandomSeed : 0) + NodeIndex * 196613;
 	FRandomStream Rand(Seed);
 
-	// 1) Ogni tanto la foglia manca
+	// 1) Sometimes the leaf is missing
 	if (Rand.FRand() < LeafSkipChance)
 	{
 		return false;
@@ -337,28 +343,28 @@ bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, 
 		return false;
 	}
 
-	// 2) Lati alternati, con qualche ripetizione sullo stesso lato
+	// 2) Alternating sides, with occasional repeats on the same side
 	float Side = ((NodeIndex / LeafEveryNNodes) % 2 == 0) ? 1.f : -1.f;
 	if (Rand.FRand() < LeafSideFlipChance)
 	{
 		Side = -Side;
 	}
 
-	// 3) Spaziatura irregolare: la base scivola verso il nodo precedente
+	// 3) Irregular spacing: the base slides toward the previous node
 	const FIvyNode& Parent = Nodes[Node.Parent];
 	const float Slide = Rand.FRandRange(0.f, LeafSpacingJitter);
 	const FVector StemPoint = FMath::Lerp(Node.Location, Parent.Location, Slide);
 
-	// 4) Picciolo con angolo e lunghezza variabili
+	// 4) Petiole with variable angle and length
 	const float PetioleYaw = Side * (LeafSideAngle + Rand.FRandRange(-LeafAngleJitter, LeafAngleJitter));
 	const FVector PetioleDir = FQuat(Node.Normal, FMath::DegreesToRadians(PetioleYaw)).RotateVector(Tangent);
 	const float PetioleLength = LeafPetioleLength * Rand.FRandRange(1.f - LeafPetioleJitter, 1.f + LeafPetioleJitter);
 
-	// 5) Lamina: ruota verso la crescita, con una variazione propria
+	// 5) Blade: turns toward the growth direction, with its own variation
 	const float BladeYaw = PetioleYaw - Side * LeafBladeTurn + Rand.FRandRange(-LeafBladeJitter, LeafBladeJitter);
 	FVector BladeDir = FQuat(Node.Normal, FMath::DegreesToRadians(BladeYaw)).RotateVector(Tangent);
 
-	// 6) Gravità (sul pavimento non ha effetto)
+	// 6) Gravity (no effect on the floor)
 	const FVector Down = FVector::VectorPlaneProject(FVector::DownVector, Node.Normal);
 	if (Down.SizeSquared() > 0.01)
 	{
@@ -372,13 +378,13 @@ bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, 
 
 	const float Scale = Rand.FRandRange(LeafScaleRange.X, LeafScaleRange.Y);
 
-	// Livelli: foglie vicine a distanze diverse dal muro → niente z-fighting
+	// Layers: nearby leaves sit at different distances from the wall -> no z-fighting
 	const int32 Layer = NodeIndex % FMath::Max(1, LeafLayerCount);
 	const float Lift = LeafLift + Layer * LeafLayerStep;
 
 	const FVector Location = StemPoint + PetioleDir * PetioleLength + Node.Normal * Lift;
 
-	// Inclinazione: la punta si alza leggermente dal muro, così le foglie non sono complanari
+	// Tilt: the tip lifts slightly off the wall, so leaves are not coplanar
 	const FVector BladeRight = FVector::CrossProduct(Node.Normal, BladeDir);
 	const float TiltDeg = Rand.FRandRange(0.f, LeafTiltJitter);
 	const FVector TiltedNormal = FQuat(BladeRight, FMath::DegreesToRadians(-TiltDeg)).RotateVector(Node.Normal);
@@ -391,9 +397,9 @@ bool AIvyPlant::ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, 
 	return true;
 }
 
-void AIvyPlant::AddLeaf(const FTransform& Transform, float BirthTime, float Random, bool bMarkDirty)
+void AIvyPlant::AddLeaf(const FTransform& Transform, float BirthTime, float Random, float Lit, bool bMarkDirty)
 {
 	const int32 Index = Leaves->AddInstance(Transform, /*bWorldSpace*/ true);
-	const float CustomData[2] = { BirthTime, Random };
+	const float CustomData[3] = { BirthTime, Random, Lit };
 	Leaves->SetCustomData(Index, MakeArrayView(CustomData), bMarkDirty);
 }

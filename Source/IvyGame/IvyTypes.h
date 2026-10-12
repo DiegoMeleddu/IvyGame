@@ -7,27 +7,27 @@
 
 class AActor;
 
-// Channel Unreal
+// Project collision channels
 namespace IvyChannels
 {
-	inline constexpr ECollisionChannel Grow = ECC_GameTraceChannel1; // IvyGrow, default Block
+	inline constexpr ECollisionChannel Grow = ECC_GameTraceChannel1;     // IvyGrow, default Block
 	inline constexpr ECollisionChannel Interact = ECC_GameTraceChannel2; // IvyInteract, default Ignore
 }
 
-// Point on the Ivy
+// A point on the ivy
 USTRUCT(BlueprintType)
 struct FIvyNode
 {
 	GENERATED_BODY()
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	FVector Location = FVector::ZeroVector;      // already raised by SurfaceOffset from the surface
+	FVector Location = FVector::ZeroVector;      // Already raised by SurfaceOffset from the surface
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	FVector Normal = FVector::UpVector;          // normal to the surface on which it rests
+	FVector Normal = FVector::UpVector;          // Normal of the surface the node rests on
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	FVector Tangent = FVector::ForwardVector;    // growth trend in terms of area
+	FVector Tangent = FVector::ForwardVector;    // Growth direction on the surface
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	int32 Parent = INDEX_NONE;
@@ -36,16 +36,16 @@ struct FIvyNode
 	int32 BranchId = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	float DistanceAlongBranch = 0.f;             // cm start plant
+	float DistanceAlongBranch = 0.f;             // cm from the start of the branch
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	float BirthTime = 0.f;                       // World time birth
+	float BirthTime = 0.f;                       // World time at creation
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	bool bLit = false;                           // grown on a lit surface (free step)
+	bool bLit = false;                           // Grown on a lit surface (free step)
 };
 
-// A generic state that a puzzle object saves/restores for the undo function
+// A generic state that a puzzle object saves/restores for undo
 USTRUCT(BlueprintType)
 struct FIvySavedState
 {
@@ -73,7 +73,7 @@ struct FIvyObjectRecord
 	FIvySavedState State;
 };
 
-// A snapshot of the state before an action. The knots are simply hanging there, so their number is sufficient.
+// State before a gesture. Nodes are only appended, so their count is enough to restore them.
 USTRUCT()
 struct FIvySnapshot
 {
@@ -92,7 +92,7 @@ struct FIvySnapshot
 	TArray<FIvyObjectRecord> Objects;
 };
 
-/** All gameplay statistics related to character growth. */
+/** All gameplay values related to ivy growth. */
 UCLASS(BlueprintType)
 class IVYGAME_API UIvyGrowthSettings : public UPrimaryDataAsset
 {
@@ -105,7 +105,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Growth", meta = (ClampMin = "0.01", Units = "s"))
 	float StepInterval = 0.05f;
 
-	/** Rotazione massima per step verso il cursore */
+	/** Maximum rotation per step toward the cursor */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Growth", meta = (ClampMin = "1", ClampMax = "180", Units = "deg"))
 	float TurnRate = 25.f;
 

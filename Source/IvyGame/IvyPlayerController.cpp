@@ -66,6 +66,7 @@ void AIvyPlayerController::FindLevelReferences()
 	if (AIvyPlant* Plant = Cast<AIvyPlant>(UGameplayStatics::GetActorOfClass(this, AIvyPlant::StaticClass())))
 	{
 		Ivy = Plant->GetGrowth();
+		// Blueprint BeginPlay runs before this point, so the HUD is created here
 		OnIvyReady(Ivy.Get());
 	}
 	else
@@ -108,6 +109,8 @@ void AIvyPlayerController::PlayerTick(float DeltaTime)
 	bCursorHit = GetHitResultUnderCursor(IvyChannels::Grow, false, CursorHit);
 
 	UIvyGrowthComponent* IvyComp = Ivy.Get();
+
+	// Growth is possible with sap, or for free on a lit surface
 	const bool bCanGrow = bCursorHit && IvyComp && UIvyGrowthComponent::IsClimbable(CursorHit)
 		&& (IvyComp->HasSapForStep() || IvyComp->IsSurfaceLit(CursorHit.ImpactPoint, CursorHit.ImpactNormal));
 

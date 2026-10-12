@@ -5,12 +5,12 @@
 #include "IvyPlant.generated.h"
 
 class UIvyGrowthComponent;
+class UIvyGraphComponent;
 class UProceduralMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
-class UIvyGraphComponent;
 
 /**
  * Ivy rendering actor.
@@ -28,7 +28,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	UIvyGrowthComponent* GetGrowth() const { return Growth; }
-	UFUNCTION(BlueprintPure, Category = "Ivy") 
+
+	UFUNCTION(BlueprintPure, Category = "Ivy")
 	UIvyGraphComponent* GetGraph() const { return Graph; }
 
 protected:
@@ -40,7 +41,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UIvyGrowthComponent> Growth;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly) 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UIvyGraphComponent> Graph;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
@@ -99,35 +100,35 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves", meta = (ClampMin = "0", ClampMax = "1"))
 	float LeafDroop = 0.35f;
 
-	/** Probabilità che un nodo non abbia la foglia. */
+	/** Chance that a node has no leaf. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
 	float LeafSkipChance = 0.15f;
 
-	/** Probabilità che una foglia stia sullo stesso lato della precedente. */
+	/** Chance that a leaf stays on the same side as the previous one. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
 	float LeafSideFlipChance = 0.12f;
 
-	/** 0 = foglia esattamente sul nodo, 1 = può scivolare fino al nodo precedente. */
+	/** 0 = leaf exactly on its node, 1 = it can slide back to the previous node. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
 	float LeafSpacingJitter = 0.7f;
 
-	/** Variazione della lunghezza del picciolo (0.3 = ±30%). */
+	/** Petiole length variation (0.3 = +/-30%). */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "1"))
 	float LeafPetioleJitter = 0.35f;
 
-	/** Variazione casuale della direzione della lamina, indipendente dal picciolo. */
+	/** Random blade direction variation, independent from the petiole. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", Units = "deg"))
 	float LeafBladeJitter = 12.f;
 
-	/** Distanza tra i livelli delle foglie: evita lo z-fighting tra foglie sovrapposte. */
+	/** Distance between leaf layers: avoids z-fighting between overlapping leaves. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", Units = "cm"))
 	float LeafLayerStep = 0.25f;
 
-	/** Numero di livelli: le foglie vicine (indici consecutivi) finiscono su livelli diversi. */
+	/** Number of layers: nearby leaves (consecutive indices) end up on different layers. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "1", ClampMax = "8"))
 	int32 LeafLayerCount = 4;
 
-	/** Inclinazione casuale della lamina rispetto al muro. */
+	/** Random tilt of the blade relative to the wall. */
 	UPROPERTY(EditAnywhere, Category = "Ivy|Leaves|Variation", meta = (ClampMin = "0", ClampMax = "30", Units = "deg"))
 	float LeafTiltJitter = 8.f;
 
@@ -145,7 +146,7 @@ private:
 	void EnsureBranchArrays(int32 BranchId);
 	UMaterialInstanceDynamic* GetOrCreateBranchMID(int32 BranchId);
 	bool ComputeLeafTransform(int32 NodeIndex, FTransform& OutTransform, float& OutRandom) const;
-	void AddLeaf(const FTransform& Transform, float BirthTime, float Random, bool bMarkDirty);
+	void AddLeaf(const FTransform& Transform, float BirthTime, float Random, float Lit, bool bMarkDirty);
 	float GetStemGrowSpeed() const;
 
 	UPROPERTY(Transient)

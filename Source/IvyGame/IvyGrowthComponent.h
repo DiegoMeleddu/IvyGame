@@ -5,14 +5,18 @@
 #include "IvyTypes.h"
 #include "IvyGrowthComponent.generated.h"
 
+class UIvyLightSubsystem;
+
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnIvyNodeAdded, int32);
 DECLARE_MULTICAST_DELEGATE(FOnIvyRebuilt);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnIvyChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnIvySapChanged, float, CurrentSap, float, MaxSap);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIvyLightGrowthChanged, bool, bGrowingInLight);
 
-class UIvyLightSubsystem;
-
+/**
+ * Owns the ivy data (nodes, branches, sap, undo) and the growth algorithm.
+ * Knows nothing about rendering: other systems listen to its events.
+ */
 UCLASS(ClassGroup = (Ivy), meta = (BlueprintSpawnableComponent))
 class IVYGAME_API UIvyGrowthComponent : public UActorComponent
 {
@@ -27,7 +31,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy", meta = (ClampMin = "1"))
 	int32 MaxUndoSteps = 50;
 
-	// Life cicle plant
+	// --- Plant life cycle ---
 	UFUNCTION(BlueprintCallable, Category = "Ivy")
 	void PlantSeed(const FVector& Location, const FVector& Normal, const FVector& Tangent);
 
@@ -49,7 +53,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	bool IsGrowing() const { return bGestureActive; }
 
-	// --- Linfa ---
+	// --- Sap ---
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Sap")
 	void AddSap(float Amount);
 
@@ -62,8 +66,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	bool HasSapForStep() const;
 
-	// --- Luce ---
-/** True if the surface point is reached by a gameplay light (growth there is free). */
+	/** Distance (cm) the plant can still grow with the current sap. -1 = unlimited. */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
+	float GetRemainingGrowthDistance() const;
+
+	// --- Light ---
+	/** True if the surface point is reached by a gameplay light (growth there is free). */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Light")
 	bool IsSurfaceLit(const FVector& Location, const FVector& Normal) const;
 
@@ -71,12 +79,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Light")
 	bool IsGrowingInLight() const { return bGrowingInLight; }
 
-	/** Distanza (cm) che la pianta può ancora percorrere con la linfa attuale. -1 = illimitata. */
-	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
-	float GetRemainingGrowthDistance() const;
-
-	// --- Query ---
-	/** LightDirection = forward of the Directional Light. */
+	// --- Queries ---
+	/** LightDirection = forward vector of the Directional Light. */
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	bool IsPointShadowed(const FVector& Point, const FVector& LightDirection) const;
 
@@ -89,9 +93,9 @@ public:
 
 	static bool IsClimbable(const FHitResult& Hit);
 
-	// Events
-	FOnIvyNodeAdded OnNodeAdded;   // C++: rendering incrementale
-	FOnIvyRebuilt   OnRebuilt;     // C++: ricostruzione totale (seed/undo)
+	// --- Events ---
+	FOnIvyNodeAdded OnNodeAdded;   // C++: incremental rendering
+	FOnIvyRebuilt   OnRebuilt;     // C++: full rebuild (seed / undo)
 
 	UPROPERTY(BlueprintAssignable, Category = "Ivy")
 	FOnIvyChanged OnIvyChanged;
@@ -119,22 +123,22 @@ private:
 	bool TraceIvy(const FVector& Start, const FVector& End, FHitResult& OutHit) const;
 
 	TArray<FIvyNode> Nodes;
-	TArray<int32> BranchTips;     
+	TArray<int32> BranchTips;
 	float Sap = 0.f;
 
 	TArray<FIvySnapshot> UndoStack;
 	FIvySnapshot PendingSnapshot;
 	bool bGestureActive = false;
-	bool bGestureDirty = false;    
+	bool bGestureDirty = false;
 
 	int32 ActiveNode = INDEX_NONE;
-	int32 ActiveBranch = INDEX_NONE; 
+	int32 ActiveBranch = INDEX_NONE;
 	FVector GrowTarget = FVector::ZeroVector;
-
-	FTimerHandle GrowTimer;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UIvyLightSubsystem> LightSubsystem;
 
 	bool bGrowingInLight = false;
+
+	FTimerHandle GrowTimer;
 };

@@ -1,12 +1,12 @@
 #include "IvyGrowthComponent.h"
 #include "IvyInteractable.h"
+#include "IvyLightSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "IvyLightSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogIvyGrowth, Log, All);
 
@@ -90,6 +90,7 @@ void UIvyGrowthComponent::PlantSeed(const FVector& Location, const FVector& Norm
 	Nodes.Add(Root);
 	BranchTips.Add(0);
 
+	SetGrowingInLight(false);
 	OnRebuilt.Broadcast();
 	OnIvyChanged.Broadcast();
 }
@@ -168,7 +169,7 @@ bool UIvyGrowthComponent::Undo()
 	return true;
 }
 
-// ------------------------------------------------------------------ Resources
+// ------------------------------------------------------------------ Sap
 
 float UIvyGrowthComponent::GetMaxSap() const
 {
@@ -188,10 +189,20 @@ float UIvyGrowthComponent::GetRemainingGrowthDistance() const
 	}
 	if (Settings->SapCostPerStep <= KINDA_SMALL_NUMBER)
 	{
-		return -1.f; // Crescita gratuita: nessun limite
+		return -1.f; // Free growth: no limit
 	}
 	const float Steps = FMath::FloorToFloat(Sap / Settings->SapCostPerStep);
 	return Steps * Settings->StepLength;
+}
+
+void UIvyGrowthComponent::AddSap(float Amount)
+{
+	if (!Settings)
+	{
+		return;
+	}
+	Sap = FMath::Clamp(Sap + Amount, 0.f, Settings->MaxSap);
+	OnSapChanged.Broadcast(Sap, Settings->MaxSap);
 }
 
 // ------------------------------------------------------------------ Light
@@ -209,16 +220,6 @@ void UIvyGrowthComponent::SetGrowingInLight(bool bInLight)
 	}
 	bGrowingInLight = bInLight;
 	OnLightGrowthChanged.Broadcast(bGrowingInLight);
-}
-
-void UIvyGrowthComponent::AddSap(float Amount)
-{
-	if (!Settings)
-	{
-		return;
-	}
-	Sap = FMath::Clamp(Sap + Amount, 0.f, Settings->MaxSap);
-	OnSapChanged.Broadcast(Sap, Settings->MaxSap);
 }
 
 // ------------------------------------------------------------------ Queries
@@ -303,6 +304,8 @@ void UIvyGrowthComponent::GrowTick()
 
 bool UIvyGrowthComponent::GrowStep()
 {
+	// Sap is checked later: a step on a lit surface is free, and we only know
+	// whether it is lit after computing where the new node goes
 	if (!Nodes.IsValidIndex(ActiveNode))
 	{
 		return false;
@@ -438,7 +441,7 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 	return false; // No surface found
 }
 
-void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir, bool bLit) 
+void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir, bool bLit)
 {
 	FIvyNode Node;
 	Node.Location = Location;
@@ -465,6 +468,7 @@ void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location,
 	BranchTips[ActiveBranch] = NewIndex;
 	ActiveNode = NewIndex;
 
+	// Only steps in the dark consume sap
 	if (!bLit)
 	{
 		Sap = FMath::Max(0.f, Sap - Settings->SapCostPerStep);
@@ -542,7 +546,7 @@ int32 UIvyGrowthComponent::FindStartNode(const FVector& Target, int32& OutBranch
 	return Best;
 }
 
-// Undo
+// ------------------------------------------------------------------ Undo
 
 FIvySnapshot UIvyGrowthComponent::MakeSnapshot() const
 {
@@ -576,13 +580,13 @@ void UIvyGrowthComponent::ApplySnapshot(const FIvySnapshot& Snapshot)
 		}
 	}
 
+	SetGrowingInLight(false);
 	OnRebuilt.Broadcast();
 	OnIvyChanged.Broadcast();
 	OnSapChanged.Broadcast(Sap, GetMaxSap());
-	SetGrowingInLight(false);
 }
 
-// Tracing
+// ------------------------------------------------------------------ Tracing
 
 bool UIvyGrowthComponent::TraceIvy(const FVector& Start, const FVector& End, FHitResult& OutHit) const
 {
