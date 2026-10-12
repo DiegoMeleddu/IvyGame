@@ -175,6 +175,20 @@ bool UIvyGrowthComponent::HasSapForStep() const
 	return Settings && Sap >= Settings->SapCostPerStep;
 }
 
+float UIvyGrowthComponent::GetRemainingGrowthDistance() const
+{
+	if (!Settings)
+	{
+		return 0.f;
+	}
+	if (Settings->SapCostPerStep <= KINDA_SMALL_NUMBER)
+	{
+		return -1.f; // Crescita gratuita: nessun limite
+	}
+	const float Steps = FMath::FloorToFloat(Sap / Settings->SapCostPerStep);
+	return Steps * Settings->StepLength;
+}
+
 void UIvyGrowthComponent::AddSap(float Amount)
 {
 	if (!Settings)

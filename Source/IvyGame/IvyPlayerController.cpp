@@ -66,6 +66,7 @@ void AIvyPlayerController::FindLevelReferences()
 	if (AIvyPlant* Plant = Cast<AIvyPlant>(UGameplayStatics::GetActorOfClass(this, AIvyPlant::StaticClass())))
 	{
 		Ivy = Plant->GetGrowth();
+		OnIvyReady(Ivy.Get());
 	}
 	else
 	{

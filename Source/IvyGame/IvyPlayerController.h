@@ -29,6 +29,10 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
 	void OnCursorUpdated(bool bHit, FVector Location, FVector Normal, bool bCanGrow);
 
+	/** Chiamato quando la pianta del livello è stata trovata. Implementa in Blueprint per creare l'HUD. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
+	void OnIvyReady(UIvyGrowthComponent* IvyGrowth);
+
 	UPROPERTY(EditDefaultsOnly, Category = "Ivy|Input")
 	TObjectPtr<UInputMappingContext> IvyMappingContext;
 

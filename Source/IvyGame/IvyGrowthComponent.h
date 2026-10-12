@@ -59,6 +59,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	bool HasSapForStep() const;
 
+	/** Distanza (cm) che la pianta può ancora percorrere con la linfa attuale. -1 = illimitata. */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
+	float GetRemainingGrowthDistance() const;
+
 	// --- Query ---
 	/** LightDirection = forward of the Directional Light. */
 	UFUNCTION(BlueprintPure, Category = "Ivy")
