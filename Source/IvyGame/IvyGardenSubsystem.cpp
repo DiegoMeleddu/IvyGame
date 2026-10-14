@@ -47,6 +47,9 @@ void UIvyGardenSubsystem::RegisterPlant(UIvyGrowthComponent* Plant)
 			return GetNameSafe(A->GetOwner()) < GetNameSafe(B->GetOwner());
 		});
 
+	// Any change on any plant becomes a single garden-wide event
+	Plant->OnIvyChanged.AddDynamic(this, &UIvyGardenSubsystem::HandlePlantChanged);
+
 	if (Graph)
 	{
 		Graph->AddPlant(Plant);
@@ -81,6 +84,8 @@ void UIvyGardenSubsystem::UnregisterPlant(UIvyGrowthComponent* Plant)
 	{
 		return;
 	}
+	Plant->OnIvyChanged.RemoveDynamic(this, &UIvyGardenSubsystem::HandlePlantChanged);
+
 	if (Graph)
 	{
 		Graph->RemovePlant(Plant);
@@ -89,6 +94,12 @@ void UIvyGardenSubsystem::UnregisterPlant(UIvyGrowthComponent* Plant)
 	{
 		SetSelected(Plants.Num() > 0 ? Plants[0].Get() : nullptr);
 	}
+	OnGardenChanged.Broadcast();
+}
+
+void UIvyGardenSubsystem::HandlePlantChanged()
+{
+	OnGardenChanged.Broadcast();
 }
 
 TArray<UIvyGrowthComponent*> UIvyGardenSubsystem::GetPlants() const
@@ -280,7 +291,8 @@ FIvyGardenSnapshot UIvyGardenSubsystem::MakeSnapshot() const
 
 void UIvyGardenSubsystem::ApplySnapshot(const FIvyGardenSnapshot& Snapshot)
 {
-	// Plants first: their rebuild events let the graph and the creature update
+	// Plants first: their rebuild events let the graph and the creature update.
+	// Objects are restored last, so their saved state always wins over reactions to the plant rebuild.
 	for (const FIvyPlantSnapshot& PlantSnapshot : Snapshot.Plants)
 	{
 		if (UIvyGrowthComponent* Plant = PlantSnapshot.Plant.Get())

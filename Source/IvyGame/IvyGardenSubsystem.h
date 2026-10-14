@@ -11,6 +11,7 @@ class UIvyGardenGraph;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGardenSapChanged, float, CurrentSap, float, MaxSap);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedPlantChanged, UIvyGrowthComponent*, SelectedPlant);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGardenLightGrowthChanged, bool, bGrowingInLight);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGardenChanged);
 
 /** Saved state of one plant for undo. Nodes are only appended, so their count is enough. */
 USTRUCT()
@@ -47,7 +48,7 @@ struct FIvyGardenSnapshot
 /**
  * Coordinates every ivy plant of the level:
  * plant registry and selection, shared sap, a single global undo stack,
- * the navigation graph shared by all plants and the events the HUD listens to.
+ * the navigation graph shared by all plants and the events the HUD and puzzles listen to.
  */
 UCLASS()
 class IVYGAME_API UIvyGardenSubsystem : public UWorldSubsystem
@@ -73,6 +74,10 @@ public:
 
 	/** Navigation graph over all plants (used by the creature). */
 	UIvyGardenGraph* GetGraph() const { return Graph; }
+
+	/** Fired when any plant grows, is seeded or is restored by undo. */
+	UPROPERTY(BlueprintAssignable, Category = "Ivy|Garden")
+	FOnGardenChanged OnGardenChanged;
 
 	// --- Selection ---
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
@@ -144,6 +149,9 @@ protected:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 
 private:
+	UFUNCTION()
+	void HandlePlantChanged();
+
 	void SetSelected(UIvyGrowthComponent* Plant);
 	void SetSap(float NewSap);
 	FIvyGardenSnapshot MakeSnapshot() const;
