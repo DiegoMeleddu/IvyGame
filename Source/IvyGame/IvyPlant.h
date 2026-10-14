@@ -5,7 +5,6 @@
 #include "IvyPlant.generated.h"
 
 class UIvyGrowthComponent;
-class UIvyGraphComponent;
 class UIvyGardenSubsystem;
 class UProceduralMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
@@ -31,9 +30,6 @@ public:
 	UIvyGrowthComponent* GetGrowth() const { return Growth; }
 
 	UFUNCTION(BlueprintPure, Category = "Ivy")
-	UIvyGraphComponent* GetGraph() const { return Graph; }
-
-	UFUNCTION(BlueprintPure, Category = "Ivy")
 	bool IsSelected() const { return bIsSelected; }
 
 protected:
@@ -49,9 +45,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UIvyGrowthComponent> Growth;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
-	TObjectPtr<UIvyGraphComponent> Graph;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UProceduralMeshComponent> StemMesh;

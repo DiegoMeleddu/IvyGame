@@ -1,4 +1,5 @@
 #include "IvyGardenSubsystem.h"
+#include "IvyGardenGraph.h"
 #include "IvyGrowthComponent.h"
 #include "IvyInteractable.h"
 #include "Engine/World.h"
@@ -16,6 +17,14 @@ bool UIvyGardenSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType)
 {
 	// Only in game and Play In Editor, not in the editor world
 	return WorldType == EWorldType::Game || WorldType == EWorldType::PIE;
+}
+
+void UIvyGardenSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	Graph = NewObject<UIvyGardenGraph>(this);
+	Graph->Initialize(GetWorld());
 }
 
 // ------------------------------------------------------------------ Plants
@@ -37,6 +46,11 @@ void UIvyGardenSubsystem::RegisterPlant(UIvyGrowthComponent* Plant)
 			}
 			return GetNameSafe(A->GetOwner()) < GetNameSafe(B->GetOwner());
 		});
+
+	if (Graph)
+	{
+		Graph->AddPlant(Plant);
+	}
 
 	// The first plant with settings defines the shared sap budget of the level
 	if (const UIvyGrowthSettings* PlantSettings = Plant->Settings)
@@ -66,6 +80,10 @@ void UIvyGardenSubsystem::UnregisterPlant(UIvyGrowthComponent* Plant)
 	if (Plants.Remove(Plant) == 0)
 	{
 		return;
+	}
+	if (Graph)
+	{
+		Graph->RemovePlant(Plant);
 	}
 	if (SelectedPlant == Plant)
 	{

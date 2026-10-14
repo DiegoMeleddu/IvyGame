@@ -6,6 +6,7 @@
 #include "IvyGardenSubsystem.generated.h"
 
 class UIvyGrowthComponent;
+class UIvyGardenGraph;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGardenSapChanged, float, CurrentSap, float, MaxSap);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedPlantChanged, UIvyGrowthComponent*, SelectedPlant);
@@ -44,7 +45,8 @@ struct FIvyGardenSnapshot
 
 /**
  * Coordinates every ivy plant of the level:
- * plant registry and selection, shared sap and a single global undo stack.
+ * plant registry and selection, shared sap, a single global undo stack
+ * and the navigation graph shared by all plants.
  */
 UCLASS()
 class IVYGAME_API UIvyGardenSubsystem : public UWorldSubsystem
@@ -52,6 +54,8 @@ class IVYGAME_API UIvyGardenSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
 	// --- Plants ---
 	void RegisterPlant(UIvyGrowthComponent* Plant);
 	void UnregisterPlant(UIvyGrowthComponent* Plant);
@@ -65,6 +69,9 @@ public:
 	/** The plant whose root is closest to Location within Radius, or null. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
 	UIvyGrowthComponent* FindPlantAtRoot(const FVector& Location, float Radius) const;
+
+	/** Navigation graph over all plants (used by the creature). */
+	UIvyGardenGraph* GetGraph() const { return Graph; }
 
 	// --- Selection ---
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
@@ -132,6 +139,9 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UIvyGrowthComponent> SelectedPlant;
+
+	UPROPERTY()
+	TObjectPtr<UIvyGardenGraph> Graph;
 
 	/** Once the player picks a plant, registration order no longer changes the selection. */
 	bool bPlayerHasSelected = false;

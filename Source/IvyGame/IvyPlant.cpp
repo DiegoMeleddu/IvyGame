@@ -1,6 +1,5 @@
 ﻿#include "IvyPlant.h"
 #include "IvyGrowthComponent.h"
-#include "IvyGraphComponent.h"
 #include "IvyGardenSubsystem.h"
 #include "IvyTypes.h"
 #include "ProceduralMeshComponent.h"
@@ -26,7 +25,6 @@ AIvyPlant::AIvyPlant()
 	RootComponent = SceneRoot;
 
 	Growth = CreateDefaultSubobject<UIvyGrowthComponent>(TEXT("Growth"));
-	Graph = CreateDefaultSubobject<UIvyGraphComponent>(TEXT("Graph"));
 
 	StemMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("StemMesh"));
 	StemMesh->SetupAttachment(SceneRoot);
