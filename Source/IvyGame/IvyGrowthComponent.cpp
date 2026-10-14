@@ -234,6 +234,12 @@ void UIvyGrowthComponent::SetGrowingInLight(bool bInLight)
 	}
 	bGrowingInLight = bInLight;
 	OnLightGrowthChanged.Broadcast(bGrowingInLight);
+
+	// Forward to the garden, so the HUD only needs to listen to one object
+	if (Garden)
+	{
+		Garden->NotifyLightGrowthChanged(bGrowingInLight);
+	}
 }
 
 // ------------------------------------------------------------------ Queries

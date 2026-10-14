@@ -162,6 +162,11 @@ void UIvyGardenSubsystem::SetSelected(UIvyGrowthComponent* Plant)
 
 // ------------------------------------------------------------------ Sap
 
+float UIvyGardenSubsystem::GetRemainingGrowthDistance() const
+{
+	return SelectedPlant ? SelectedPlant->GetRemainingGrowthDistance() : 0.f;
+}
+
 void UIvyGardenSubsystem::AddSap(float Amount)
 {
 	SetSap(Sap + Amount);
@@ -176,6 +181,13 @@ void UIvyGardenSubsystem::SetSap(float NewSap)
 {
 	Sap = FMath::Clamp(NewSap, 0.f, MaxSap);
 	OnSapChanged.Broadcast(Sap, MaxSap);
+}
+
+// ------------------------------------------------------------------ Light
+
+void UIvyGardenSubsystem::NotifyLightGrowthChanged(bool bGrowingInLight)
+{
+	OnLightGrowthChanged.Broadcast(bGrowingInLight);
 }
 
 // ------------------------------------------------------------------ Undo

@@ -10,6 +10,7 @@ class UIvyGardenGraph;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGardenSapChanged, float, CurrentSap, float, MaxSap);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedPlantChanged, UIvyGrowthComponent*, SelectedPlant);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGardenLightGrowthChanged, bool, bGrowingInLight);
 
 /** Saved state of one plant for undo. Nodes are only appended, so their count is enough. */
 USTRUCT()
@@ -45,8 +46,8 @@ struct FIvyGardenSnapshot
 
 /**
  * Coordinates every ivy plant of the level:
- * plant registry and selection, shared sap, a single global undo stack
- * and the navigation graph shared by all plants.
+ * plant registry and selection, shared sap, a single global undo stack,
+ * the navigation graph shared by all plants and the events the HUD listens to.
  */
 UCLASS()
 class IVYGAME_API UIvyGardenSubsystem : public UWorldSubsystem
@@ -77,6 +78,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
 	UIvyGrowthComponent* GetSelectedPlant() const { return SelectedPlant; }
 
+	/** 0-based position of the selected plant in the selection order, or -1. */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
+	int32 GetSelectedPlantIndex() const { return Plants.IndexOfByKey(SelectedPlant); }
+
 	/** Ignored while the selected plant is growing. */
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Garden")
 	void SelectPlant(UIvyGrowthComponent* Plant);
@@ -95,6 +100,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
 	float GetMaxSap() const { return MaxSap; }
 
+	/** Distance (cm) the selected plant can still grow with the shared sap. -1 = unlimited. */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
+	float GetRemainingGrowthDistance() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Garden")
 	void AddSap(float Amount);
 
@@ -102,6 +111,13 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Ivy|Garden")
 	FOnGardenSapChanged OnSapChanged;
+
+	// --- Light ---
+	/** Called by plants. Only the selected plant can grow, so this always describes the active plant. */
+	void NotifyLightGrowthChanged(bool bGrowingInLight);
+
+	UPROPERTY(BlueprintAssignable, Category = "Ivy|Garden")
+	FOnGardenLightGrowthChanged OnLightGrowthChanged;
 
 	// --- Global undo ---
 	/** Call when the player starts a growth gesture: takes a snapshot of the whole level. */
