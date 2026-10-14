@@ -47,6 +47,16 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Ivy|Input")
 	TObjectPtr<UInputAction> ResetAction;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Ivy|Input")
+	TObjectPtr<UInputAction> NextPlantAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Ivy|Input")
+	TObjectPtr<UInputAction> PreviousPlantAction;
+
+	/** Clicking within this distance of another plant's root selects it instead of growing. */
+	UPROPERTY(EditDefaultsOnly, Category = "Ivy|Input", meta = (ClampMin = "0", Units = "cm"))
+	float RootSelectRadius = 40.f;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Ivy|Camera")
 	FName CameraTag = TEXT("IvyCamera");
 
@@ -58,6 +68,8 @@ private:
 	void OnGrowStopped();
 	void OnUndo();
 	void OnReset();
+	void OnNextPlant();
+	void OnPreviousPlant();
 	void FindLevelReferences();
 
 	TWeakObjectPtr<UIvyGardenSubsystem> Garden;

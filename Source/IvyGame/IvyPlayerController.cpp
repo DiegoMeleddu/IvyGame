@@ -114,6 +114,14 @@ void AIvyPlayerController::SetupInputComponent()
 	{
 		EIC->BindAction(ResetAction, ETriggerEvent::Started, this, &AIvyPlayerController::OnReset);
 	}
+	if (NextPlantAction)
+	{
+		EIC->BindAction(NextPlantAction, ETriggerEvent::Started, this, &AIvyPlayerController::OnNextPlant);
+	}
+	if (PreviousPlantAction)
+	{
+		EIC->BindAction(PreviousPlantAction, ETriggerEvent::Started, this, &AIvyPlayerController::OnPreviousPlant);
+	}
 }
 
 void AIvyPlayerController::PlayerTick(float DeltaTime)
@@ -138,16 +146,25 @@ void AIvyPlayerController::PlayerTick(float DeltaTime)
 
 void AIvyPlayerController::OnGrowStarted()
 {
+	UIvyGardenSubsystem* GardenPtr = Garden.Get();
 	UIvyGrowthComponent* Plant = GetIvy();
-	if (!bCursorHit || !Plant)
+	if (!bCursorHit || !GardenPtr || !Plant)
 	{
 		return;
 	}
-	// The garden snapshots the whole level, then the selected plant starts growing
-	if (Garden.IsValid())
+
+	// Clicking the root of another plant selects it instead of growing
+	if (UIvyGrowthComponent* Clicked = GardenPtr->FindPlantAtRoot(CursorHit.ImpactPoint, RootSelectRadius))
 	{
-		Garden->BeginGesture();
+		if (Clicked != Plant)
+		{
+			GardenPtr->SelectPlant(Clicked);
+			return;
+		}
 	}
+
+	// The garden snapshots the whole level, then the selected plant starts growing
+	GardenPtr->BeginGesture();
 	Plant->BeginGesture(CursorHit.ImpactPoint);
 }
 
@@ -175,4 +192,20 @@ void AIvyPlayerController::OnUndo()
 void AIvyPlayerController::OnReset()
 {
 	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this)));
+}
+
+void AIvyPlayerController::OnNextPlant()
+{
+	if (Garden.IsValid())
+	{
+		Garden->SelectNextPlant(1);
+	}
+}
+
+void AIvyPlayerController::OnPreviousPlant()
+{
+	if (Garden.IsValid())
+	{
+		Garden->SelectNextPlant(-1);
+	}
 }

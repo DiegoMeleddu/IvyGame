@@ -62,10 +62,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
 	int32 GetNumPlants() const { return Plants.Num(); }
 
+	/** The plant whose root is closest to Location within Radius, or null. */
+	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
+	UIvyGrowthComponent* FindPlantAtRoot(const FVector& Location, float Radius) const;
+
 	// --- Selection ---
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
 	UIvyGrowthComponent* GetSelectedPlant() const { return SelectedPlant; }
 
+	/** Ignored while the selected plant is growing. */
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Garden")
 	void SelectPlant(UIvyGrowthComponent* Plant);
 

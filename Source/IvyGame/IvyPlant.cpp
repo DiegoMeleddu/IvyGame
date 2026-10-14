@@ -1,6 +1,7 @@
 ﻿#include "IvyPlant.h"
 #include "IvyGrowthComponent.h"
 #include "IvyGraphComponent.h"
+#include "IvyGardenSubsystem.h"
 #include "IvyTypes.h"
 #include "ProceduralMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -14,6 +15,7 @@ namespace
 	const FName GrowLengthParam(TEXT("GrowLength"));
 	const FName BranchLengthParam(TEXT("BranchLength"));
 	const FName IvyTimeParam(TEXT("IvyTime"));
+	const FName SelectedParam(TEXT("Selected"));
 }
 
 AIvyPlant::AIvyPlant()
@@ -40,7 +42,7 @@ AIvyPlant::AIvyPlant()
 
 void AIvyPlant::BeginPlay()
 {
-	Super::BeginPlay(); // Also initializes the growth component
+	Super::BeginPlay(); // Also initializes the growth component, which registers in the garden
 
 	Growth->OnNodeAdded.AddUObject(this, &AIvyPlant::HandleNodeAdded);
 	Growth->OnRebuilt.AddUObject(this, &AIvyPlant::HandleRebuilt);
@@ -63,6 +65,23 @@ void AIvyPlant::BeginPlay()
 
 	const float Offset = Growth->Settings ? Growth->Settings->SurfaceOffset : 2.f;
 	Growth->PlantSeed(SeedLocation + SeedNormal * Offset, SeedNormal, GetActorForwardVector());
+
+	// Selection highlight: listen to the garden, then apply the current state
+	Garden = GetWorld()->GetSubsystem<UIvyGardenSubsystem>();
+	if (Garden)
+	{
+		Garden->OnSelectedPlantChanged.AddDynamic(this, &AIvyPlant::HandleSelectedPlantChanged);
+		ApplySelection(Garden->GetSelectedPlant() == Growth);
+	}
+}
+
+void AIvyPlant::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (Garden)
+	{
+		Garden->OnSelectedPlantChanged.RemoveDynamic(this, &AIvyPlant::HandleSelectedPlantChanged);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void AIvyPlant::Tick(float DeltaSeconds)
@@ -100,6 +119,30 @@ float AIvyPlant::GetStemGrowSpeed() const
 	}
 	const UIvyGrowthSettings* S = Growth->Settings;
 	return S ? (S->StepLength / FMath::Max(S->StepInterval, 0.01f)) * 1.5f : 200.f;
+}
+
+// ------------------------------------------------------------------ Selection
+
+void AIvyPlant::HandleSelectedPlantChanged(UIvyGrowthComponent* SelectedPlant)
+{
+	ApplySelection(SelectedPlant == Growth);
+}
+
+void AIvyPlant::ApplySelection(bool bSelected)
+{
+	bIsSelected = bSelected;
+	const float Value = bSelected ? 1.f : 0.f;
+
+	for (const TObjectPtr<UMaterialInstanceDynamic>& MID : BranchMIDs)
+	{
+		if (MID)
+		{
+			MID->SetScalarParameterValue(SelectedParam, Value);
+		}
+	}
+	Leaves->SetScalarParameterValueOnMaterials(SelectedParam, Value);
+
+	OnSelectionChanged(bSelected);
 }
 
 // ------------------------------------------------------------------ Event handlers
@@ -196,6 +239,7 @@ UMaterialInstanceDynamic* AIvyPlant::GetOrCreateBranchMID(int32 BranchId)
 	{
 		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(StemMaterial, this);
 		MID->SetScalarParameterValue(GrowLengthParam, 0.f);
+		MID->SetScalarParameterValue(SelectedParam, bIsSelected ? 1.f : 0.f); // New branches match the current selection
 		BranchMIDs[BranchId] = MID;
 	}
 	return BranchMIDs[BranchId];

@@ -6,6 +6,7 @@
 
 class UIvyGrowthComponent;
 class UIvyGraphComponent;
+class UIvyGardenSubsystem;
 class UProceduralMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 class UMaterialInterface;
@@ -32,8 +33,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	UIvyGraphComponent* GetGraph() const { return Graph; }
 
+	UFUNCTION(BlueprintPure, Category = "Ivy")
+	bool IsSelected() const { return bIsSelected; }
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** Called when this plant becomes (or stops being) the selected one. Implement in Blueprint for extra feedback. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
+	void OnSelectionChanged(bool bSelected);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -140,6 +149,10 @@ protected:
 	float SeedTraceDistance = 300.f;
 
 private:
+	UFUNCTION()
+	void HandleSelectedPlantChanged(UIvyGrowthComponent* SelectedPlant);
+
+	void ApplySelection(bool bSelected);
 	void HandleNodeAdded(int32 NodeIndex);
 	void HandleRebuilt();
 	void BuildBranch(int32 BranchId);
@@ -152,6 +165,11 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> BranchMIDs;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UIvyGardenSubsystem> Garden;
+
 	TArray<float> BranchShownLength;
 	TArray<float> BranchTargetLength;
+
+	bool bIsSelected = false;
 };

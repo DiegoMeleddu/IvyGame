@@ -84,6 +84,27 @@ TArray<UIvyGrowthComponent*> UIvyGardenSubsystem::GetPlants() const
 	return Result;
 }
 
+UIvyGrowthComponent* UIvyGardenSubsystem::FindPlantAtRoot(const FVector& Location, float Radius) const
+{
+	UIvyGrowthComponent* Best = nullptr;
+	double BestDistSq = FMath::Square(static_cast<double>(Radius));
+
+	for (const TObjectPtr<UIvyGrowthComponent>& Plant : Plants)
+	{
+		if (!Plant || Plant->GetNumNodes() == 0)
+		{
+			continue;
+		}
+		const double DistSq = FVector::DistSquared(Plant->GetNodes()[0].Location, Location);
+		if (DistSq <= BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = Plant;
+		}
+	}
+	return Best;
+}
+
 // ------------------------------------------------------------------ Selection
 
 void UIvyGardenSubsystem::SelectPlant(UIvyGrowthComponent* Plant)
