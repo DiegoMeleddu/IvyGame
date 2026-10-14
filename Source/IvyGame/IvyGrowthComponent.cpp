@@ -13,12 +13,24 @@ DEFINE_LOG_CATEGORY_STATIC(LogIvyGrowth, Log, All);
 static TAutoConsoleVariable<int32> CVarIvyDebug(
 	TEXT("ivy.Debug"),
 	0,
-	TEXT("Growth debug drawing. 0 = off, 1 = traces, nodes and target."),
+	TEXT("Growth debug drawing. 0 = off, 1 = traces, nodes, target and detour candidates."),
 	ECVF_Cheat);
 
 namespace
 {
 	const FName NoIvyTag(TEXT("NoIvy"));
+
+	/** Below this ratio (in-plane / total), the target is considered off this surface: go around instead of steering. */
+	constexpr double MinInPlaneRatio = 0.3;
+
+	/** Directions tried around the surface normal when choosing a detour. */
+	constexpr int32 NumDetourCandidates = 8;
+
+	/** Moving the target farther than this many steps counts as a new target. */
+	constexpr float TargetResetSteps = 6.f;
+
+	/** A detour ends once the ivy is this many steps closer than when it started. */
+	constexpr float DetourExitSteps = 3.f;
 
 	bool ImplementsIvyInteractable(const AActor* Actor)
 	{
@@ -81,6 +93,7 @@ void UIvyGrowthComponent::PlantSeed(const FVector& Location, const FVector& Norm
 {
 	GetWorld()->GetTimerManager().ClearTimer(GrowTimer);
 	bGestureActive = false;
+	ResetSteering();
 
 	Nodes.Reset();
 	BranchTips.Reset();
@@ -128,6 +141,8 @@ bool UIvyGrowthComponent::BeginGesture(const FVector& Target)
 	}
 
 	GrowTarget = Target;
+	TrackedTarget = Target;
+	ResetSteering();
 	bGestureActive = true;
 
 	GrowTick(); // Run the first step immediately for responsiveness
@@ -138,6 +153,22 @@ bool UIvyGrowthComponent::BeginGesture(const FVector& Target)
 void UIvyGrowthComponent::SetGrowTarget(const FVector& Target)
 {
 	GrowTarget = Target;
+
+	if (!Settings || FVector::DistSquared(Target, TrackedTarget) <= FMath::Square(static_cast<double>(Settings->StepLength * TargetResetSteps)))
+	{
+		return;
+	}
+
+	// A clearly new target: restart progress tracking and the detour budget,
+	// but keep an active detour going (only its reference distance changes)
+	TrackedTarget = Target;
+	RecentDistances.Reset();
+	DetourSteps = 0;
+	bDetourGaveUp = false;
+	if (bDetouring && Nodes.IsValidIndex(ActiveNode))
+	{
+		DetourStartDistance = FVector::Dist(Nodes[ActiveNode].Location, Target);
+	}
 }
 
 void UIvyGrowthComponent::EndGesture()
@@ -151,6 +182,7 @@ void UIvyGrowthComponent::EndGesture()
 	bGestureActive = false;
 	ActiveNode = INDEX_NONE;
 	ActiveBranch = INDEX_NONE;
+	ResetSteering();
 
 	SetGrowingInLight(false);
 }
@@ -171,6 +203,7 @@ void UIvyGrowthComponent::RestoreToSnapshot(int32 NumNodes, const TArray<int32>&
 	bGestureActive = false;
 	ActiveNode = INDEX_NONE;
 	ActiveBranch = INDEX_NONE;
+	ResetSteering();
 
 	Nodes.SetNum(FMath::Clamp(NumNodes, 0, Nodes.Num()));
 	BranchTips = InBranchTips;
@@ -315,7 +348,7 @@ void UIvyGrowthComponent::GrowTick()
 #if ENABLE_DRAW_DEBUG
 	if (IsIvyDebugOn())
 	{
-		DrawDebugSphere(GetWorld(), GrowTarget, Settings->ArriveRadius, 12, FColor::Yellow, false, Settings->StepInterval * 1.1f);
+		DrawDebugSphere(GetWorld(), GrowTarget, Settings->ArriveRadius, 12, bDetouring ? FColor::Orange : FColor::Yellow, false, Settings->StepInterval * 1.1f);
 	}
 #endif
 
@@ -326,7 +359,7 @@ bool UIvyGrowthComponent::GrowStep()
 {
 	// Sap is checked later: a step on a lit surface is free, and we only know
 	// whether it is lit after computing where the new node goes
-	if (!Nodes.IsValidIndex(ActiveNode))
+	if (!Nodes.IsValidIndex(ActiveNode) || bDetourGaveUp)
 	{
 		return false;
 	}
@@ -334,61 +367,90 @@ bool UIvyGrowthComponent::GrowStep()
 	const FIvyNode From = Nodes[ActiveNode]; // Copy by value: adding to the array may reallocate it
 
 	const FVector ToTarget = GrowTarget - From.Location;
-	if (ToTarget.SizeSquared() <= FMath::Square(static_cast<double>(Settings->ArriveRadius)))
+	const double Distance = ToTarget.Size();
+	if (Distance <= Settings->ArriveRadius)
 	{
 		return false; // Target reached
 	}
 
-	// 1) Compute the desired direction on the current surface plane
-	const FVector Desired = FVector::VectorPlaneProject(ToTarget, From.Normal).GetSafeNormal();
-	if (Desired.IsNearlyZero())
+	// 1) Leave the detour once clearly closer than where it started
+	if (bDetouring && Distance < DetourStartDistance - Settings->StepLength * DetourExitSteps)
 	{
+		bDetouring = false;
+		RecentDistances.Reset();
+	}
+
+	// 2) Choose the direction: greedy steering, or going around an obstacle
+	bool bSteerValid = false;
+	FVector Dir = ComputeSteeringDir(From, ToTarget, bSteerValid);
+
+	if (!bDetouring)
+	{
+		RecentDistances.Add(Distance);
+		if (RecentDistances.Num() > StuckWindow)
+		{
+			RecentDistances.RemoveAt(0);
+		}
+
+		if (!bSteerValid || IsStuck(Distance))
+		{
+			// Local minimum (loop, back-and-forth) or target off this surface: pick a way around
+			if (!ChooseDetourDir(From, Dir))
+			{
+				bDetourGaveUp = true;
+				return false;
+			}
+			bDetouring = true;
+			DetourStartDistance = Distance;
+			RecentDistances.Reset();
+		}
+		else
+		{
+			// Deterministic random deviation, only while steering freely (detours stay predictable)
+			FRandomStream Stream(Settings->RandomSeed + Nodes.Num() * 7919);
+			const float WanderRad = FMath::DegreesToRadians(Stream.FRandRange(-Settings->Wander, Settings->Wander));
+			Dir = FQuat(From.Normal, WanderRad).RotateVector(Dir);
+			Dir = FVector::VectorPlaneProject(Dir, From.Normal).GetSafeNormal();
+		}
+	}
+	else
+	{
+		// Follow the obstacle: keep going straight along the surface (edges are handled by FindPlacement)
+		Dir = FVector::VectorPlaneProject(From.Tangent, From.Normal).GetSafeNormal();
+	}
+
+	if (bDetouring && ++DetourSteps > MaxDetourSteps)
+	{
+		bDetourGaveUp = true; // Save sap: wait for a new target
 		return false;
 	}
 
-	FVector Current = FVector::VectorPlaneProject(From.Tangent, From.Normal).GetSafeNormal();
-	if (Current.IsNearlyZero())
-	{
-		Current = Desired;
-	}
-
-	// 2) Clamp the turning angle per step
-	FVector Dir = Desired;
-	const double AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Current | Desired, -1.0, 1.0)));
-	if (AngleDeg > Settings->TurnRate)
-	{
-		const FQuat FullTurn = FQuat::FindBetweenNormals(Current, Desired);
-		const float Alpha = static_cast<float>(Settings->TurnRate / AngleDeg);
-		Dir = FQuat::Slerp(FQuat::Identity, FullTurn, Alpha).RotateVector(Current);
-	}
-
-	// 3) Apply deterministic random deviation
-	FRandomStream Stream(Settings->RandomSeed + Nodes.Num() * 7919);
-	const float WanderRad = FMath::DegreesToRadians(Stream.FRandRange(-Settings->Wander, Settings->Wander));
-	Dir = FQuat(From.Normal, WanderRad).RotateVector(Dir);
-	Dir = FVector::VectorPlaneProject(Dir, From.Normal).GetSafeNormal();
 	if (Dir.IsNearlyZero())
 	{
 		return false;
 	}
 
-	// 4) Find a valid placement for the new node
+	// 3) Find a valid placement for the new node
 	FVector NewLocation, NewNormal;
-	if (!FindPlacement(From, Dir, NewLocation, NewNormal))
+	if (!FindPlacement(From, Dir, NewLocation, NewNormal, /*bAllowInteraction*/ true))
 	{
-		return false; // No valid placement this step
+		if (!bDetouring)
+		{
+			return false; // Counts as no progress: a detour starts once the window shows it
+		}
+
+		// The detour hit a dead end: choose a new way around from here
+		if (!ChooseDetourDir(From, Dir) || !FindPlacement(From, Dir, NewLocation, NewNormal, true))
+		{
+			bDetourGaveUp = true;
+			return false;
+		}
 	}
 
-	// 5) Compute the new tangent, with a fallback for degenerate cases
-	FVector NewTangent = FVector::VectorPlaneProject(Dir, NewNormal);
-	if (NewTangent.SizeSquared() < 0.09)
-	{
-		const FVector Fallback = (Dir | NewNormal) < 0.0 ? From.Normal : -From.Normal;
-		NewTangent = FVector::VectorPlaneProject(Fallback, NewNormal);
-	}
-	NewTangent.Normalize();
+	// 4) Compute the new tangent, with a fallback for degenerate cases
+	const FVector NewTangent = ComputeTangent(Dir, From.Normal, NewNormal);
 
-	// 6) Light: a step on a lit surface is free, otherwise it needs sap
+	// 5) Light: a step on a lit surface is free, otherwise it needs sap
 	const bool bLit = IsSurfaceLit(NewLocation, NewNormal);
 	if (!bLit && !HasSapForStep())
 	{
@@ -400,7 +462,152 @@ bool UIvyGrowthComponent::GrowStep()
 	return true;
 }
 
-bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal)
+// ------------------------------------------------------------------ Steering
+
+FVector UIvyGrowthComponent::ComputeSteeringDir(const FIvyNode& From, const FVector& ToTarget, bool& bOutValid) const
+{
+	bOutValid = false;
+
+	const double TotalLength = ToTarget.Size();
+	const FVector InPlane = FVector::VectorPlaneProject(ToTarget, From.Normal);
+	if (TotalLength <= KINDA_SMALL_NUMBER || InPlane.Size() < TotalLength * MinInPlaneRatio)
+	{
+		return FVector::ZeroVector; // Target mostly behind or in front of this surface
+	}
+
+	const FVector Desired = InPlane.GetSafeNormal();
+	FVector Current = FVector::VectorPlaneProject(From.Tangent, From.Normal).GetSafeNormal();
+	if (Current.IsNearlyZero())
+	{
+		Current = Desired;
+	}
+
+	// Clamp the turning angle per step
+	FVector Dir = Desired;
+	const double AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Current | Desired, -1.0, 1.0)));
+	if (AngleDeg > Settings->TurnRate)
+	{
+		const FQuat FullTurn = FQuat::FindBetweenNormals(Current, Desired);
+		const float Alpha = static_cast<float>(Settings->TurnRate / AngleDeg);
+		Dir = FQuat::Slerp(FQuat::Identity, FullTurn, Alpha).RotateVector(Current);
+	}
+
+	bOutValid = true;
+	return Dir.GetSafeNormal();
+}
+
+bool UIvyGrowthComponent::IsStuck(double Distance) const
+{
+	if (RecentDistances.Num() < StuckWindow)
+	{
+		return false; // Not enough history yet
+	}
+	// Efficiency check: over the window, at least MinProgressRatio of the grown length must be real progress
+	const double Gained = RecentDistances[0] - Distance;
+	const double Required = static_cast<double>(StuckWindow - 1) * Settings->StepLength * MinProgressRatio;
+	return Gained < Required;
+}
+
+bool UIvyGrowthComponent::ChooseDetourDir(const FIvyNode& From, FVector& OutDir) const
+{
+	// Reference axis on the surface: toward the target if possible, else world up, else any axis
+	FVector Axis = FVector::VectorPlaneProject(GrowTarget - From.Location, From.Normal).GetSafeNormal();
+	if (Axis.IsNearlyZero())
+	{
+		Axis = FVector::VectorPlaneProject(FVector::UpVector, From.Normal).GetSafeNormal();
+	}
+	if (Axis.IsNearlyZero())
+	{
+		FVector Unused;
+		From.Normal.FindBestAxisVectors(Axis, Unused);
+	}
+
+	double BestScore = TNumericLimits<double>::Max();
+	bool bFound = false;
+
+	for (int32 i = 0; i < NumDetourCandidates; ++i)
+	{
+		const float AngleRad = 2.f * PI * static_cast<float>(i) / static_cast<float>(NumDetourCandidates);
+		const FVector Candidate = FQuat(From.Normal, AngleRad).RotateVector(Axis);
+
+		const double Score = SimulateStraight(From, Candidate, DetourLookaheadSteps);
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			OutDir = Candidate;
+			bFound = true;
+		}
+	}
+
+#if ENABLE_DRAW_DEBUG
+	if (bFound && IsIvyDebugOn())
+	{
+		DrawDebugDirectionalArrow(GetWorld(), From.Location, From.Location + OutDir * 30.f, 8.f, FColor::Magenta, false, 3.f, 0, 1.f);
+	}
+#endif
+	return bFound;
+}
+
+double UIvyGrowthComponent::SimulateStraight(const FIvyNode& From, const FVector& StartDir, int32 Steps) const
+{
+	FIvyNode Node = From;
+	double Closest = TNumericLimits<double>::Max();
+
+	for (int32 i = 0; i < Steps; ++i)
+	{
+		const FVector Dir = (i == 0)
+			? StartDir
+			: FVector::VectorPlaneProject(Node.Tangent, Node.Normal).GetSafeNormal();
+		if (Dir.IsNearlyZero())
+		{
+			break;
+		}
+
+		FVector Location, Normal;
+		if (!FindPlacement(Node, Dir, Location, Normal, /*bAllowInteraction*/ false))
+		{
+			break; // Dead end: the candidate is scored on what it reached so far
+		}
+
+#if ENABLE_DRAW_DEBUG
+		if (IsIvyDebugOn())
+		{
+			DrawDebugLine(GetWorld(), Node.Location, Location, FColor(255, 140, 0, 120), false, 2.f, 0, 0.3f);
+		}
+#endif
+
+		Node.Tangent = ComputeTangent(Dir, Node.Normal, Normal);
+		Node.Location = Location;
+		Node.Normal = Normal;
+		Closest = FMath::Min(Closest, FVector::Dist(Location, GrowTarget));
+	}
+	return Closest; // Max if even the first step failed
+}
+
+FVector UIvyGrowthComponent::ComputeTangent(const FVector& Dir, const FVector& FromNormal, const FVector& NewNormal)
+{
+	FVector Tangent = FVector::VectorPlaneProject(Dir, NewNormal);
+	if (Tangent.SizeSquared() < 0.09)
+	{
+		// Wrapping an edge: continue "over" it instead of stopping
+		const FVector Fallback = (Dir | NewNormal) < 0.0 ? FromNormal : -FromNormal;
+		Tangent = FVector::VectorPlaneProject(Fallback, NewNormal);
+	}
+	return Tangent.GetSafeNormal();
+}
+
+void UIvyGrowthComponent::ResetSteering()
+{
+	RecentDistances.Reset();
+	DetourStartDistance = 0.0;
+	DetourSteps = 0;
+	bDetouring = false;
+	bDetourGaveUp = false;
+}
+
+// ------------------------------------------------------------------ Placement
+
+bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal, bool bAllowInteraction) const
 {
 	const float Step = Settings->StepLength;
 	const float Offset = Settings->SurfaceOffset;
@@ -416,8 +623,8 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 		AActor* HitActor = Hit.GetActor();
 		if (ImplementsIvyInteractable(HitActor))
 		{
-			// Pushing objects always requires sap, even in the light
-			if (HasSapForStep() && IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
+			// Pushing objects always requires sap, even in the light. Dry runs never push.
+			if (bAllowInteraction && HasSapForStep() && IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
 			{
 				if (Garden)
 				{
@@ -501,7 +708,7 @@ void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location,
 #if ENABLE_DRAW_DEBUG
 	if (IsIvyDebugOn())
 	{
-		DrawDebugPoint(GetWorld(), Location, 8.f, FColor::Cyan, false, 3.f);
+		DrawDebugPoint(GetWorld(), Location, 8.f, bDetouring ? FColor::Orange : FColor::Cyan, false, 3.f);
 		DrawDebugLine(GetWorld(), Location, Location + Normal * 10.f, FColor::Blue, false, 3.f, 0, 0.5f);
 	}
 #endif

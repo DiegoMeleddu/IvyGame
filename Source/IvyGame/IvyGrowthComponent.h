@@ -34,6 +34,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy")
 	int32 SelectionOrder = 0;
 
+	// --- Obstacle avoidance ---
+	/** Number of recent steps used to measure progress toward the target. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "2"))
+	int32 StuckWindow = 8;
+
+	/** Minimum fraction of the grown distance that must bring the ivy closer to the target (0.3 = 30%). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "0", ClampMax = "1"))
+	float MinProgressRatio = 0.3f;
+
+	/** Steps simulated for each candidate direction when choosing how to go around an obstacle. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "1"))
+	int32 DetourLookaheadSteps = 20;
+
+	/** Total detour steps allowed for one target before giving up (saves sap). Moving the cursor retries. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "1"))
+	int32 MaxDetourSteps = 80;
+
 	// --- Plant life cycle ---
 	UFUNCTION(BlueprintCallable, Category = "Ivy")
 	void PlantSeed(const FVector& Location, const FVector& Normal, const FVector& Tangent);
@@ -125,7 +142,26 @@ private:
 
 	void GrowTick();
 	bool GrowStep();
-	bool FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal);
+
+	/** Placement of the next node. bAllowInteraction = false for dry runs (no pushes, no side effects). */
+	bool FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal, bool bAllowInteraction) const;
+
+	// --- Steering ---
+	/** Greedy direction toward the target on the current surface. bOutValid = false if the target is mostly off this surface's plane. */
+	FVector ComputeSteeringDir(const FIvyNode& From, const FVector& ToTarget, bool& bOutValid) const;
+
+	/** True if the recent steps brought the ivy too little closer to the target (loops, back-and-forth). */
+	bool IsStuck(double Distance) const;
+
+	/** Simulates candidate directions and returns the one that gets closest to the target. */
+	bool ChooseDetourDir(const FIvyNode& From, FVector& OutDir) const;
+
+	/** Dry run: grows straight along the surface and returns the closest distance to the target reached. */
+	double SimulateStraight(const FIvyNode& From, const FVector& StartDir, int32 Steps) const;
+
+	static FVector ComputeTangent(const FVector& Dir, const FVector& FromNormal, const FVector& NewNormal);
+	void ResetSteering();
+
 	void AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir, bool bLit);
 	void SetGrowingInLight(bool bInLight);
 	void NotifyInteractables(const FVector& Location, const FVector& Dir);
@@ -139,6 +175,14 @@ private:
 	int32 ActiveNode = INDEX_NONE;
 	int32 ActiveBranch = INDEX_NONE;
 	FVector GrowTarget = FVector::ZeroVector;
+
+	// --- Steering state (per gesture, never saved) ---
+	FVector TrackedTarget = FVector::ZeroVector;
+	TArray<double> RecentDistances;   // Distances to the target over the last StuckWindow steps
+	double DetourStartDistance = 0.0;
+	int32 DetourSteps = 0;            // Total detour steps for the current target
+	bool bDetouring = false;
+	bool bDetourGaveUp = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UIvyLightSubsystem> LightSubsystem;
