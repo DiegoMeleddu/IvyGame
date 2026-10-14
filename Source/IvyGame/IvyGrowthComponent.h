@@ -6,6 +6,7 @@
 #include "IvyGrowthComponent.generated.h"
 
 class UIvyLightSubsystem;
+class UIvyGardenSubsystem;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnIvyNodeAdded, int32);
 DECLARE_MULTICAST_DELEGATE(FOnIvyRebuilt);
@@ -14,7 +15,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnIvySapChanged, float, CurrentSap
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIvyLightGrowthChanged, bool, bGrowingInLight);
 
 /**
- * Owns the ivy data (nodes, branches, sap, undo) and the growth algorithm.
+ * Owns the data of one ivy plant (nodes, branches) and the growth algorithm.
+ * Sap and undo are shared by all plants and live in UIvyGardenSubsystem.
  * Knows nothing about rendering: other systems listen to its events.
  */
 UCLASS(ClassGroup = (Ivy), meta = (BlueprintSpawnableComponent))
@@ -28,8 +30,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy")
 	TObjectPtr<UIvyGrowthSettings> Settings;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy", meta = (ClampMin = "1"))
-	int32 MaxUndoSteps = 50;
+	/** Lower values come first when the player cycles plants. The lowest is selected at start. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy")
+	int32 SelectionOrder = 0;
 
 	// --- Plant life cycle ---
 	UFUNCTION(BlueprintCallable, Category = "Ivy")
@@ -44,21 +47,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Ivy")
 	void EndGesture();
 
+	/** Undo is global: forwards to the garden. */
 	UFUNCTION(BlueprintCallable, Category = "Ivy")
 	bool Undo();
 
 	UFUNCTION(BlueprintPure, Category = "Ivy")
-	bool CanUndo() const { return !bGestureActive && UndoStack.Num() > 0; }
+	bool CanUndo() const;
 
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	bool IsGrowing() const { return bGestureActive; }
 
-	// --- Sap ---
+	// --- Sap (shared by all plants, owned by the garden) ---
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Sap")
 	void AddSap(float Amount);
 
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
-	float GetSap() const { return Sap; }
+	float GetSap() const;
 
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	float GetMaxSap() const;
@@ -66,7 +70,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	bool HasSapForStep() const;
 
-	/** Distance (cm) the plant can still grow with the current sap. -1 = unlimited. */
+	/** Distance (cm) this plant can still grow with the shared sap. -1 = unlimited. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	float GetRemainingGrowthDistance() const;
 
@@ -88,10 +92,14 @@ public:
 	int32 GetNumNodes() const { return Nodes.Num(); }
 
 	const TArray<FIvyNode>& GetNodes() const { return Nodes; }
+	const TArray<int32>& GetBranchTips() const { return BranchTips; }
 	int32 GetNumBranches() const { return BranchTips.Num(); }
 	int32 GetBranchTip(int32 BranchId) const;
 
 	static bool IsClimbable(const FHitResult& Hit);
+
+	/** Called by the garden on undo: truncates the plant to a previous state. */
+	void RestoreToSnapshot(int32 NumNodes, const TArray<int32>& InBranchTips);
 
 	// --- Events ---
 	FOnIvyNodeAdded OnNodeAdded;   // C++: incremental rendering
@@ -100,6 +108,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Ivy")
 	FOnIvyChanged OnIvyChanged;
 
+	/** Re-broadcast of the garden shared sap, so existing HUD bindings keep working. */
 	UPROPERTY(BlueprintAssignable, Category = "Ivy")
 	FOnIvySapChanged OnSapChanged;
 
@@ -111,6 +120,9 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	UFUNCTION()
+	void HandleGardenSapChanged(float CurrentSap, float MaxSap);
+
 	void GrowTick();
 	bool GrowStep();
 	bool FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal);
@@ -118,25 +130,21 @@ private:
 	void SetGrowingInLight(bool bInLight);
 	void NotifyInteractables(const FVector& Location, const FVector& Dir);
 	int32 FindStartNode(const FVector& Target, int32& OutBranch) const;
-	FIvySnapshot MakeSnapshot() const;
-	void ApplySnapshot(const FIvySnapshot& Snapshot);
 	bool TraceIvy(const FVector& Start, const FVector& End, FHitResult& OutHit) const;
 
 	TArray<FIvyNode> Nodes;
 	TArray<int32> BranchTips;
-	float Sap = 0.f;
 
-	TArray<FIvySnapshot> UndoStack;
-	FIvySnapshot PendingSnapshot;
 	bool bGestureActive = false;
-	bool bGestureDirty = false;
-
 	int32 ActiveNode = INDEX_NONE;
 	int32 ActiveBranch = INDEX_NONE;
 	FVector GrowTarget = FVector::ZeroVector;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UIvyLightSubsystem> LightSubsystem;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UIvyGardenSubsystem> Garden;
 
 	bool bGrowingInLight = false;
 

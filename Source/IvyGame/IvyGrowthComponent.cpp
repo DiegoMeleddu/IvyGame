@@ -1,12 +1,12 @@
 #include "IvyGrowthComponent.h"
 #include "IvyInteractable.h"
 #include "IvyLightSubsystem.h"
+#include "IvyGardenSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
-#include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogIvyGrowth, Log, All);
 
@@ -41,15 +41,19 @@ void UIvyGrowthComponent::BeginPlay()
 	Super::BeginPlay();
 
 	LightSubsystem = GetWorld()->GetSubsystem<UIvyLightSubsystem>();
+	Garden = GetWorld()->GetSubsystem<UIvyGardenSubsystem>();
 
 	if (!Settings)
 	{
 		UE_LOG(LogIvyGrowth, Error, TEXT("%s: Settings not assigned! Assign an IvyGrowthSettings asset on the component."), *GetNameSafe(GetOwner()));
-		return;
 	}
 
-	Sap = Settings->MaxSap;
-	OnSapChanged.Broadcast(Sap, Settings->MaxSap);
+	if (Garden)
+	{
+		// Bind first, so the initial sap broadcast during registration reaches this plant too
+		Garden->OnSapChanged.AddDynamic(this, &UIvyGrowthComponent::HandleGardenSapChanged);
+		Garden->RegisterPlant(this);
+	}
 }
 
 void UIvyGrowthComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -58,7 +62,17 @@ void UIvyGrowthComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		World->GetTimerManager().ClearTimer(GrowTimer);
 	}
+	if (Garden)
+	{
+		Garden->OnSapChanged.RemoveDynamic(this, &UIvyGrowthComponent::HandleGardenSapChanged);
+		Garden->UnregisterPlant(this);
+	}
 	Super::EndPlay(EndPlayReason);
+}
+
+void UIvyGrowthComponent::HandleGardenSapChanged(float CurrentSap, float MaxSap)
+{
+	OnSapChanged.Broadcast(CurrentSap, MaxSap);
 }
 
 // ------------------------------------------------------------------ Initialization
@@ -70,7 +84,6 @@ void UIvyGrowthComponent::PlantSeed(const FVector& Location, const FVector& Norm
 
 	Nodes.Reset();
 	BranchTips.Reset();
-	UndoStack.Reset();
 
 	FIvyNode Root;
 	Root.Location = Location;
@@ -108,9 +121,6 @@ bool UIvyGrowthComponent::BeginGesture(const FVector& Target)
 		EndGesture();
 	}
 
-	PendingSnapshot = MakeSnapshot();
-	bGestureDirty = false;
-
 	ActiveNode = FindStartNode(Target, ActiveBranch);
 	if (ActiveNode == INDEX_NONE)
 	{
@@ -139,18 +149,6 @@ void UIvyGrowthComponent::EndGesture()
 
 	GetWorld()->GetTimerManager().ClearTimer(GrowTimer);
 	bGestureActive = false;
-
-	const bool bChanged = Nodes.Num() != PendingSnapshot.NumNodes || bGestureDirty;
-	if (bChanged)
-	{
-		UndoStack.Add(MoveTemp(PendingSnapshot));
-		if (UndoStack.Num() > MaxUndoSteps)
-		{
-			UndoStack.RemoveAt(0);
-		}
-	}
-
-	PendingSnapshot = FIvySnapshot();
 	ActiveNode = INDEX_NONE;
 	ActiveBranch = INDEX_NONE;
 
@@ -159,26 +157,44 @@ void UIvyGrowthComponent::EndGesture()
 
 bool UIvyGrowthComponent::Undo()
 {
-	if (!CanUndo())
-	{
-		return false;
-	}
+	return Garden && Garden->Undo();
+}
 
-	const FIvySnapshot Snapshot = UndoStack.Pop();
-	ApplySnapshot(Snapshot);
-	return true;
+bool UIvyGrowthComponent::CanUndo() const
+{
+	return !bGestureActive && Garden && Garden->CanUndo();
+}
+
+void UIvyGrowthComponent::RestoreToSnapshot(int32 NumNodes, const TArray<int32>& InBranchTips)
+{
+	GetWorld()->GetTimerManager().ClearTimer(GrowTimer);
+	bGestureActive = false;
+	ActiveNode = INDEX_NONE;
+	ActiveBranch = INDEX_NONE;
+
+	Nodes.SetNum(FMath::Clamp(NumNodes, 0, Nodes.Num()));
+	BranchTips = InBranchTips;
+
+	SetGrowingInLight(false);
+	OnRebuilt.Broadcast();
+	OnIvyChanged.Broadcast();
 }
 
 // ------------------------------------------------------------------ Sap
 
+float UIvyGrowthComponent::GetSap() const
+{
+	return Garden ? Garden->GetSap() : 0.f;
+}
+
 float UIvyGrowthComponent::GetMaxSap() const
 {
-	return Settings ? Settings->MaxSap : 0.f;
+	return Garden ? Garden->GetMaxSap() : 0.f;
 }
 
 bool UIvyGrowthComponent::HasSapForStep() const
 {
-	return Settings && Sap >= Settings->SapCostPerStep;
+	return Settings && GetSap() >= Settings->SapCostPerStep;
 }
 
 float UIvyGrowthComponent::GetRemainingGrowthDistance() const
@@ -191,18 +207,16 @@ float UIvyGrowthComponent::GetRemainingGrowthDistance() const
 	{
 		return -1.f; // Free growth: no limit
 	}
-	const float Steps = FMath::FloorToFloat(Sap / Settings->SapCostPerStep);
+	const float Steps = FMath::FloorToFloat(GetSap() / Settings->SapCostPerStep);
 	return Steps * Settings->StepLength;
 }
 
 void UIvyGrowthComponent::AddSap(float Amount)
 {
-	if (!Settings)
+	if (Garden)
 	{
-		return;
+		Garden->AddSap(Amount);
 	}
-	Sap = FMath::Clamp(Sap + Amount, 0.f, Settings->MaxSap);
-	OnSapChanged.Broadcast(Sap, Settings->MaxSap);
 }
 
 // ------------------------------------------------------------------ Light
@@ -399,7 +413,10 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 			// Pushing objects always requires sap, even in the light
 			if (HasSapForStep() && IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
 			{
-				bGestureDirty = true; // Mark state as changed
+				if (Garden)
+				{
+					Garden->MarkGestureDirty(); // The level changed without growing
+				}
 			}
 			return false;
 		}
@@ -468,10 +485,10 @@ void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location,
 	BranchTips[ActiveBranch] = NewIndex;
 	ActiveNode = NewIndex;
 
-	// Only steps in the dark consume sap
-	if (!bLit)
+	// Only steps in the dark consume the shared sap (the garden broadcasts the change)
+	if (!bLit && Garden)
 	{
-		Sap = FMath::Max(0.f, Sap - Settings->SapCostPerStep);
+		Garden->ConsumeSap(Settings->SapCostPerStep);
 	}
 	SetGrowingInLight(bLit);
 
@@ -485,7 +502,6 @@ void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location,
 
 	OnNodeAdded.Broadcast(NewIndex);
 	OnIvyChanged.Broadcast();
-	OnSapChanged.Broadcast(Sap, Settings->MaxSap);
 
 	NotifyInteractables(Location, Dir);
 }
@@ -544,46 +560,6 @@ int32 UIvyGrowthComponent::FindStartNode(const FVector& Target, int32& OutBranch
 
 	OutBranch = INDEX_NONE; // Otherwise, start a new branch
 	return Best;
-}
-
-// ------------------------------------------------------------------ Undo
-
-FIvySnapshot UIvyGrowthComponent::MakeSnapshot() const
-{
-	FIvySnapshot Snapshot;
-	Snapshot.NumNodes = Nodes.Num();
-	Snapshot.BranchTips = BranchTips;
-	Snapshot.Sap = Sap;
-
-	TArray<AActor*> Interactables;
-	UGameplayStatics::GetAllActorsWithInterface(this, UIvyInteractable::StaticClass(), Interactables);
-	for (AActor* Actor : Interactables)
-	{
-		FIvyObjectRecord& Record = Snapshot.Objects.AddDefaulted_GetRef();
-		Record.Actor = Actor;
-		Record.State = IIvyInteractable::Execute_IvySaveState(Actor);
-	}
-	return Snapshot;
-}
-
-void UIvyGrowthComponent::ApplySnapshot(const FIvySnapshot& Snapshot)
-{
-	Nodes.SetNum(Snapshot.NumNodes);
-	BranchTips = Snapshot.BranchTips;
-	Sap = Snapshot.Sap;
-
-	for (const FIvyObjectRecord& Record : Snapshot.Objects)
-	{
-		if (AActor* Actor = Record.Actor.Get())
-		{
-			IIvyInteractable::Execute_IvyRestoreState(Actor, Record.State);
-		}
-	}
-
-	SetGrowingInLight(false);
-	OnRebuilt.Broadcast();
-	OnIvyChanged.Broadcast();
-	OnSapChanged.Broadcast(Sap, GetMaxSap());
 }
 
 // ------------------------------------------------------------------ Tracing

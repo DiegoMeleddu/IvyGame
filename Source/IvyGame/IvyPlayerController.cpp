@@ -1,6 +1,6 @@
 #include "IvyPlayerController.h"
 #include "IvyGrowthComponent.h"
-#include "IvyPlant.h"
+#include "IvyGardenSubsystem.h"
 #include "IvyTypes.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -63,16 +63,30 @@ void AIvyPlayerController::FindLevelReferences()
 		UE_LOG(LogIvyController, Warning, TEXT("No CameraActor with tag '%s' found in the level."), *CameraTag.ToString());
 	}
 
-	if (AIvyPlant* Plant = Cast<AIvyPlant>(UGameplayStatics::GetActorOfClass(this, AIvyPlant::StaticClass())))
+	// Plants register in the garden during their own BeginPlay, which may run before or after ours
+	Garden = GetWorld()->GetSubsystem<UIvyGardenSubsystem>();
+	if (UIvyGardenSubsystem* GardenPtr = Garden.Get())
 	{
-		Ivy = Plant->GetGrowth();
-		// Blueprint BeginPlay runs before this point, so the HUD is created here
-		OnIvyReady(Ivy.Get());
+		GardenPtr->OnSelectedPlantChanged.AddDynamic(this, &AIvyPlayerController::HandleSelectedPlantChanged);
+		if (UIvyGrowthComponent* Selected = GardenPtr->GetSelectedPlant())
+		{
+			HandleSelectedPlantChanged(Selected);
+		}
 	}
-	else
+}
+
+void AIvyPlayerController::HandleSelectedPlantChanged(UIvyGrowthComponent* SelectedPlant)
+{
+	if (SelectedPlant && !bIvyReadyFired)
 	{
-		UE_LOG(LogIvyController, Warning, TEXT("No AIvyPlant found in the level."));
+		bIvyReadyFired = true;
+		OnIvyReady(SelectedPlant);
 	}
+}
+
+UIvyGrowthComponent* AIvyPlayerController::GetIvy() const
+{
+	return Garden.IsValid() ? Garden->GetSelectedPlant() : nullptr;
 }
 
 void AIvyPlayerController::SetupInputComponent()
@@ -108,15 +122,15 @@ void AIvyPlayerController::PlayerTick(float DeltaTime)
 
 	bCursorHit = GetHitResultUnderCursor(IvyChannels::Grow, false, CursorHit);
 
-	UIvyGrowthComponent* IvyComp = Ivy.Get();
+	UIvyGrowthComponent* Plant = GetIvy();
 
 	// Growth is possible with sap, or for free on a lit surface
-	const bool bCanGrow = bCursorHit && IvyComp && UIvyGrowthComponent::IsClimbable(CursorHit)
-		&& (IvyComp->HasSapForStep() || IvyComp->IsSurfaceLit(CursorHit.ImpactPoint, CursorHit.ImpactNormal));
+	const bool bCanGrow = bCursorHit && Plant && UIvyGrowthComponent::IsClimbable(CursorHit)
+		&& (Plant->HasSapForStep() || Plant->IsSurfaceLit(CursorHit.ImpactPoint, CursorHit.ImpactNormal));
 
-	if (bCursorHit && IvyComp && IvyComp->IsGrowing())
+	if (bCursorHit && Plant && Plant->IsGrowing())
 	{
-		IvyComp->SetGrowTarget(CursorHit.ImpactPoint);
+		Plant->SetGrowTarget(CursorHit.ImpactPoint);
 	}
 
 	OnCursorUpdated(bCursorHit, CursorHit.ImpactPoint, CursorHit.ImpactNormal, bCanGrow);
@@ -124,25 +138,37 @@ void AIvyPlayerController::PlayerTick(float DeltaTime)
 
 void AIvyPlayerController::OnGrowStarted()
 {
-	if (bCursorHit && Ivy.IsValid())
+	UIvyGrowthComponent* Plant = GetIvy();
+	if (!bCursorHit || !Plant)
 	{
-		Ivy->BeginGesture(CursorHit.ImpactPoint);
+		return;
 	}
+	// The garden snapshots the whole level, then the selected plant starts growing
+	if (Garden.IsValid())
+	{
+		Garden->BeginGesture();
+	}
+	Plant->BeginGesture(CursorHit.ImpactPoint);
 }
 
 void AIvyPlayerController::OnGrowStopped()
 {
-	if (Ivy.IsValid())
+	if (UIvyGrowthComponent* Plant = GetIvy())
 	{
-		Ivy->EndGesture();
+		Plant->EndGesture();
+	}
+	if (Garden.IsValid())
+	{
+		Garden->EndGesture();
 	}
 }
 
 void AIvyPlayerController::OnUndo()
 {
-	if (Ivy.IsValid())
+	UIvyGrowthComponent* Plant = GetIvy();
+	if (Garden.IsValid() && !(Plant && Plant->IsGrowing()))
 	{
-		Ivy->Undo();
+		Garden->Undo();
 	}
 }
 

@@ -7,6 +7,7 @@
 class UInputMappingContext;
 class UInputAction;
 class UIvyGrowthComponent;
+class UIvyGardenSubsystem;
 
 UCLASS()
 class IVYGAME_API AIvyPlayerController : public APlayerController
@@ -18,8 +19,9 @@ public:
 
 	virtual void PlayerTick(float DeltaTime) override;
 
+	/** The currently selected plant (the one that grows on click). */
 	UFUNCTION(BlueprintPure, Category = "Ivy")
-	UIvyGrowthComponent* GetIvy() const { return Ivy.Get(); }
+	UIvyGrowthComponent* GetIvy() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -29,7 +31,7 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
 	void OnCursorUpdated(bool bHit, FVector Location, FVector Normal, bool bCanGrow);
 
-	/** Called once the level plant has been found. Implement in Blueprint to create the HUD. */
+	/** Called once, when the first plant becomes available. Implement in Blueprint to create the HUD. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Ivy")
 	void OnIvyReady(UIvyGrowthComponent* IvyGrowth);
 
@@ -49,13 +51,18 @@ protected:
 	FName CameraTag = TEXT("IvyCamera");
 
 private:
+	UFUNCTION()
+	void HandleSelectedPlantChanged(UIvyGrowthComponent* SelectedPlant);
+
 	void OnGrowStarted();
 	void OnGrowStopped();
 	void OnUndo();
 	void OnReset();
 	void FindLevelReferences();
 
-	TWeakObjectPtr<UIvyGrowthComponent> Ivy;
+	TWeakObjectPtr<UIvyGardenSubsystem> Garden;
+	bool bIvyReadyFired = false;
+
 	FHitResult CursorHit;
 	bool bCursorHit = false;
 };
