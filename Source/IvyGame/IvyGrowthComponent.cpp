@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "HAL/IConsoleManager.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogIvyGrowth, Log, All);
 
@@ -20,8 +21,8 @@ namespace
 {
 	const FName NoIvyTag(TEXT("NoIvy"));
 
-	/** Below this ratio (in-plane / total), the target is considered off this surface: go around instead of steering. */
-	constexpr double MinInPlaneRatio = 0.3;
+	/** Greedy steering is trusted only if the target is within ~45 degrees of the surface plane (in-plane / total). */
+	constexpr double MinInPlaneRatio = 0.7;
 
 	/** Directions tried around the surface normal when choosing a detour. */
 	constexpr int32 NumDetourCandidates = 8;
@@ -29,8 +30,11 @@ namespace
 	/** Moving the target farther than this many steps counts as a new target. */
 	constexpr float TargetResetSteps = 6.f;
 
-	/** A detour ends once the ivy is this many steps closer than when it started. */
+	/** A detour ends once the ivy is this many steps closer than when it started (and greedy steering is reliable). */
 	constexpr float DetourExitSteps = 3.f;
+
+	/** Score bonus (in steps) for continuing in the current direction: avoids zig-zag between re-plans. */
+	constexpr float KeepDirectionBonusSteps = 1.f;
 
 	bool ImplementsIvyInteractable(const AActor* Actor)
 	{
@@ -159,15 +163,17 @@ void UIvyGrowthComponent::SetGrowTarget(const FVector& Target)
 		return;
 	}
 
-	// A clearly new target: restart progress tracking and the detour budget,
-	// but keep an active detour going (only its reference distance changes)
+	// A clearly new target: restart progress tracking, keep an active detour but re-plan it right away
 	TrackedTarget = Target;
 	RecentDistances.Reset();
-	DetourSteps = 0;
 	bDetourGaveUp = false;
+	DetourStepsWithoutGain = 0;
 	if (bDetouring && Nodes.IsValidIndex(ActiveNode))
 	{
-		DetourStartDistance = FVector::Dist(Nodes[ActiveNode].Location, Target);
+		const double Distance = FVector::Dist(Nodes[ActiveNode].Location, Target);
+		DetourStartDistance = Distance;
+		DetourBestDistance = Distance;
+		StepsSinceReplan = DetourReplanSteps;
 	}
 }
 
@@ -373,16 +379,16 @@ bool UIvyGrowthComponent::GrowStep()
 		return false; // Target reached
 	}
 
-	// 1) Leave the detour once clearly closer than where it started
-	if (bDetouring && Distance < DetourStartDistance - Settings->StepLength * DetourExitSteps)
+	// 1) Greedy direction toward the target on this surface (fast path)
+	bool bSteerValid = false;
+	FVector Dir = ComputeSteeringDir(From, ToTarget, bSteerValid);
+
+	// 2) Leave the detour once clearly closer and greedy steering is reliable again
+	if (bDetouring && bSteerValid && Distance < DetourStartDistance - Settings->StepLength * DetourExitSteps)
 	{
 		bDetouring = false;
 		RecentDistances.Reset();
 	}
-
-	// 2) Choose the direction: greedy steering, or going around an obstacle
-	bool bSteerValid = false;
-	FVector Dir = ComputeSteeringDir(From, ToTarget, bSteerValid);
 
 	if (!bDetouring)
 	{
@@ -394,15 +400,13 @@ bool UIvyGrowthComponent::GrowStep()
 
 		if (!bSteerValid || IsStuck(Distance))
 		{
-			// Local minimum (loop, back-and-forth) or target off this surface: pick a way around
+			// Local minimum (loop, back-and-forth) or target off this surface: plan a way around
 			if (!ChooseDetourDir(From, Dir))
 			{
 				bDetourGaveUp = true;
 				return false;
 			}
-			bDetouring = true;
-			DetourStartDistance = Distance;
-			RecentDistances.Reset();
+			BeginDetour(Distance);
 		}
 		else
 		{
@@ -415,14 +419,32 @@ bool UIvyGrowthComponent::GrowStep()
 	}
 	else
 	{
-		// Follow the obstacle: keep going straight along the surface (edges are handled by FindPlacement)
-		Dir = FVector::VectorPlaneProject(From.Tangent, From.Normal).GetSafeNormal();
-	}
+		// Give up only after many steps without getting closer (a long but useful detour is fine)
+		if (Distance < DetourBestDistance - Settings->StepLength)
+		{
+			DetourBestDistance = Distance;
+			DetourStepsWithoutGain = 0;
+		}
+		else if (++DetourStepsWithoutGain > MaxDetourSteps)
+		{
+			bDetourGaveUp = true; // Save sap: wait for a new target
+			return false;
+		}
 
-	if (bDetouring && ++DetourSteps > MaxDetourSteps)
-	{
-		bDetourGaveUp = true; // Save sap: wait for a new target
-		return false;
+		// Receding horizon: re-plan regularly, otherwise follow the surface straight
+		if (++StepsSinceReplan >= DetourReplanSteps)
+		{
+			StepsSinceReplan = 0;
+			if (!ChooseDetourDir(From, Dir))
+			{
+				bDetourGaveUp = true;
+				return false;
+			}
+		}
+		else
+		{
+			Dir = FVector::VectorPlaneProject(From.Tangent, From.Normal).GetSafeNormal();
+		}
 	}
 
 	if (Dir.IsNearlyZero())
@@ -439,7 +461,8 @@ bool UIvyGrowthComponent::GrowStep()
 			return false; // Counts as no progress: a detour starts once the window shows it
 		}
 
-		// The detour hit a dead end: choose a new way around from here
+		// The detour hit a dead end: re-plan from here
+		StepsSinceReplan = 0;
 		if (!ChooseDetourDir(From, Dir) || !FindPlacement(From, Dir, NewLocation, NewNormal, true))
 		{
 			bDetourGaveUp = true;
@@ -472,7 +495,7 @@ FVector UIvyGrowthComponent::ComputeSteeringDir(const FIvyNode& From, const FVec
 	const FVector InPlane = FVector::VectorPlaneProject(ToTarget, From.Normal);
 	if (TotalLength <= KINDA_SMALL_NUMBER || InPlane.Size() < TotalLength * MinInPlaneRatio)
 	{
-		return FVector::ZeroVector; // Target mostly behind or in front of this surface
+		return FVector::ZeroVector; // Target too far off this surface: the projection would mislead
 	}
 
 	const FVector Desired = InPlane.GetSafeNormal();
@@ -508,8 +531,26 @@ bool UIvyGrowthComponent::IsStuck(double Distance) const
 	return Gained < Required;
 }
 
+void UIvyGrowthComponent::BeginDetour(double Distance)
+{
+	bDetouring = true;
+	DetourStartDistance = Distance;
+	DetourBestDistance = Distance;
+	DetourStepsWithoutGain = 0;
+	StepsSinceReplan = 0;
+	RecentDistances.Reset();
+}
+
 bool UIvyGrowthComponent::ChooseDetourDir(const FIvyNode& From, FVector& OutDir) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Ivy_ChooseDetour);
+
+	const double Distance = FVector::Dist(From.Location, GrowTarget);
+
+	// Look-ahead grows with the distance: far targets need to "see" past the obstacle
+	const int32 Steps = FMath::Clamp(FMath::CeilToInt(static_cast<float>(Distance) / Settings->StepLength),
+		DetourLookaheadSteps, FMath::Max(DetourLookaheadSteps, MaxLookaheadSteps));
+
 	// Reference axis on the surface: toward the target if possible, else world up, else any axis
 	FVector Axis = FVector::VectorPlaneProject(GrowTarget - From.Location, From.Normal).GetSafeNormal();
 	if (Axis.IsNearlyZero())
@@ -525,12 +566,26 @@ bool UIvyGrowthComponent::ChooseDetourDir(const FIvyNode& From, FVector& OutDir)
 	double BestScore = TNumericLimits<double>::Max();
 	bool bFound = false;
 
+	// Candidate 0: keep the current direction (small bonus to avoid zig-zag between re-plans)
+	const FVector KeepDir = FVector::VectorPlaneProject(From.Tangent, From.Normal).GetSafeNormal();
+	if (!KeepDir.IsNearlyZero())
+	{
+		const double Score = SimulateStraight(From, KeepDir, Steps);
+		if (Score < TNumericLimits<double>::Max())
+		{
+			BestScore = Score - Settings->StepLength * KeepDirectionBonusSteps;
+			OutDir = KeepDir;
+			bFound = true;
+		}
+	}
+
+	// Candidates 1..N: evenly spaced directions around the surface normal
 	for (int32 i = 0; i < NumDetourCandidates; ++i)
 	{
 		const float AngleRad = 2.f * PI * static_cast<float>(i) / static_cast<float>(NumDetourCandidates);
 		const FVector Candidate = FQuat(From.Normal, AngleRad).RotateVector(Axis);
 
-		const double Score = SimulateStraight(From, Candidate, DetourLookaheadSteps);
+		const double Score = SimulateStraight(From, Candidate, Steps);
 		if (Score < BestScore)
 		{
 			BestScore = Score;
@@ -572,7 +627,7 @@ double UIvyGrowthComponent::SimulateStraight(const FIvyNode& From, const FVector
 #if ENABLE_DRAW_DEBUG
 		if (IsIvyDebugOn())
 		{
-			DrawDebugLine(GetWorld(), Node.Location, Location, FColor(255, 140, 0, 120), false, 2.f, 0, 0.3f);
+			DrawDebugLine(GetWorld(), Node.Location, Location, FColor(255, 140, 0, 120), false, 1.f, 0, 0.3f);
 		}
 #endif
 
@@ -580,6 +635,11 @@ double UIvyGrowthComponent::SimulateStraight(const FIvyNode& From, const FVector
 		Node.Location = Location;
 		Node.Normal = Normal;
 		Closest = FMath::Min(Closest, FVector::Dist(Location, GrowTarget));
+
+		if (Closest <= Settings->ArriveRadius)
+		{
+			break; // This route reaches the target: no need to look further
+		}
 	}
 	return Closest; // Max if even the first step failed
 }
@@ -600,7 +660,9 @@ void UIvyGrowthComponent::ResetSteering()
 {
 	RecentDistances.Reset();
 	DetourStartDistance = 0.0;
-	DetourSteps = 0;
+	DetourBestDistance = 0.0;
+	DetourStepsWithoutGain = 0;
+	StepsSinceReplan = 0;
 	bDetouring = false;
 	bDetourGaveUp = false;
 }

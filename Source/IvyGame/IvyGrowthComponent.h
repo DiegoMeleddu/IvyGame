@@ -43,11 +43,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "0", ClampMax = "1"))
 	float MinProgressRatio = 0.3f;
 
-	/** Steps simulated for each candidate direction when choosing how to go around an obstacle. */
+	/** Shortest look-ahead (steps) when simulating detour directions. Used for nearby targets. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "1"))
 	int32 DetourLookaheadSteps = 20;
 
-	/** Total detour steps allowed for one target before giving up (saves sap). Moving the cursor retries. */
+	/** Longest look-ahead (steps). The look-ahead grows with the distance to the target up to this value. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "1"))
+	int32 MaxLookaheadSteps = 80;
+
+	/** While going around an obstacle, the route is re-planned every this many steps. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "1"))
+	int32 DetourReplanSteps = 8;
+
+	/** Detour steps allowed without getting closer before giving up (saves sap). Moving the cursor retries. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Steering", meta = (ClampMin = "1"))
 	int32 MaxDetourSteps = 80;
 
@@ -147,19 +155,20 @@ private:
 	bool FindPlacement(const FIvyNode& From, const FVector& Dir, FVector& OutLocation, FVector& OutNormal, bool bAllowInteraction) const;
 
 	// --- Steering ---
-	/** Greedy direction toward the target on the current surface. bOutValid = false if the target is mostly off this surface's plane. */
+	/** Greedy direction toward the target on the current surface. bOutValid = false if the target is too far off this surface's plane. */
 	FVector ComputeSteeringDir(const FIvyNode& From, const FVector& ToTarget, bool& bOutValid) const;
 
 	/** True if the recent steps brought the ivy too little closer to the target (loops, back-and-forth). */
 	bool IsStuck(double Distance) const;
 
-	/** Simulates candidate directions and returns the one that gets closest to the target. */
+	/** Simulates candidate directions (plus "keep going") and returns the one that gets closest to the target. */
 	bool ChooseDetourDir(const FIvyNode& From, FVector& OutDir) const;
 
 	/** Dry run: grows straight along the surface and returns the closest distance to the target reached. */
 	double SimulateStraight(const FIvyNode& From, const FVector& StartDir, int32 Steps) const;
 
 	static FVector ComputeTangent(const FVector& Dir, const FVector& FromNormal, const FVector& NewNormal);
+	void BeginDetour(double Distance);
 	void ResetSteering();
 
 	void AddNode(const FIvyNode& From, const FVector& Location, const FVector& Normal, const FVector& Tangent, const FVector& Dir, bool bLit);
@@ -178,9 +187,11 @@ private:
 
 	// --- Steering state (per gesture, never saved) ---
 	FVector TrackedTarget = FVector::ZeroVector;
-	TArray<double> RecentDistances;   // Distances to the target over the last StuckWindow steps
+	TArray<double> RecentDistances;     // Distances to the target over the last StuckWindow steps
 	double DetourStartDistance = 0.0;
-	int32 DetourSteps = 0;            // Total detour steps for the current target
+	double DetourBestDistance = 0.0;
+	int32 DetourStepsWithoutGain = 0;
+	int32 StepsSinceReplan = 0;
 	bool bDetouring = false;
 	bool bDetourGaveUp = false;
 
