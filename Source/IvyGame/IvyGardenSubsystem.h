@@ -9,6 +9,7 @@ class UIvyGrowthComponent;
 class UIvyGardenGraph;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGardenSapChanged, float, CurrentSap, float, MaxSap);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPlantSapChanged, UIvyGrowthComponent*, Plant, float, CurrentSap, float, MaxSap);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedPlantChanged, UIvyGrowthComponent*, SelectedPlant);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGardenLightGrowthChanged, bool, bGrowingInLight);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGardenChanged);
@@ -27,9 +28,12 @@ struct FIvyPlantSnapshot
 
 	UPROPERTY()
 	TArray<int32> BranchTips;
+
+	UPROPERTY()
+	float Sap = 0.f;
 };
 
-/** Saved state of the whole level before a gesture: all plants, shared sap and puzzle objects. */
+/** Saved state of the whole level before a gesture: all plants (with their sap) and puzzle objects. */
 USTRUCT()
 struct FIvyGardenSnapshot
 {
@@ -39,16 +43,14 @@ struct FIvyGardenSnapshot
 	TArray<FIvyPlantSnapshot> Plants;
 
 	UPROPERTY()
-	float Sap = 0.f;
-
-	UPROPERTY()
 	TArray<FIvyObjectRecord> Objects;
 };
 
 /**
  * Coordinates every ivy plant of the level:
- * plant registry and selection, shared sap, a single global undo stack,
+ * plant registry and selection, a single global undo stack,
  * the navigation graph shared by all plants and the events the HUD and puzzles listen to.
+ * Each plant owns its sap; the garden only relays sap events.
  */
 UCLASS()
 class IVYGAME_API UIvyGardenSubsystem : public UWorldSubsystem
@@ -98,24 +100,33 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Ivy|Garden")
 	FOnSelectedPlantChanged OnSelectedPlantChanged;
 
-	// --- Shared sap ---
+	// --- Sap (per plant) ---
+	/** Sap of the selected plant. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
-	float GetSap() const { return Sap; }
+	float GetSap() const;
 
+	/** Max sap of the selected plant. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
-	float GetMaxSap() const { return MaxSap; }
+	float GetMaxSap() const;
 
-	/** Distance (cm) the selected plant can still grow with the shared sap. -1 = unlimited. */
+	/** Distance (cm) the selected plant can still grow with its sap. -1 = unlimited. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Garden")
 	float GetRemainingGrowthDistance() const;
 
+	/** Adds sap to the selected plant: it is always the one growing, so pickups reward the plant that touched them. */
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Garden")
 	void AddSap(float Amount);
 
-	void ConsumeSap(float Amount);
+	/** Called by plants when their sap changes. */
+	void NotifyPlantSapChanged(UIvyGrowthComponent* Plant);
 
+	/** Sap of the SELECTED plant changed (also fired when the selection changes). Kept for simple HUDs. */
 	UPROPERTY(BlueprintAssignable, Category = "Ivy|Garden")
 	FOnGardenSapChanged OnSapChanged;
+
+	/** Sap of ANY plant changed. Use this for one HUD row per plant. */
+	UPROPERTY(BlueprintAssignable, Category = "Ivy|Garden")
+	FOnPlantSapChanged OnPlantSapChanged;
 
 	// --- Light ---
 	/** Called by plants. Only the selected plant can grow, so this always describes the active plant. */
@@ -153,7 +164,6 @@ private:
 	void HandlePlantChanged();
 
 	void SetSelected(UIvyGrowthComponent* Plant);
-	void SetSap(float NewSap);
 	FIvyGardenSnapshot MakeSnapshot() const;
 	void ApplySnapshot(const FIvyGardenSnapshot& Snapshot);
 	bool HasChangedSince(const FIvyGardenSnapshot& Snapshot) const;
@@ -169,10 +179,6 @@ private:
 
 	/** Once the player picks a plant, registration order no longer changes the selection. */
 	bool bPlayerHasSelected = false;
-
-	float Sap = 0.f;
-	float MaxSap = 0.f;
-	bool bSapInitialized = false;
 
 	TArray<FIvyGardenSnapshot> UndoStack;
 	FIvyGardenSnapshot PendingSnapshot;

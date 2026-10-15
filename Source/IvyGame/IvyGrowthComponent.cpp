@@ -64,10 +64,11 @@ void UIvyGrowthComponent::BeginPlay()
 		UE_LOG(LogIvyGrowth, Error, TEXT("%s: Settings not assigned! Assign an IvyGrowthSettings asset on the component."), *GetNameSafe(GetOwner()));
 	}
 
+	// Each plant starts with its own full budget (before registering, so the garden broadcasts the right value)
+	Sap = GetMaxSap();
+
 	if (Garden)
 	{
-		// Bind first, so the initial sap broadcast during registration reaches this plant too
-		Garden->OnSapChanged.AddDynamic(this, &UIvyGrowthComponent::HandleGardenSapChanged);
 		Garden->RegisterPlant(this);
 	}
 }
@@ -80,15 +81,9 @@ void UIvyGrowthComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	if (Garden)
 	{
-		Garden->OnSapChanged.RemoveDynamic(this, &UIvyGrowthComponent::HandleGardenSapChanged);
 		Garden->UnregisterPlant(this);
 	}
 	Super::EndPlay(EndPlayReason);
-}
-
-void UIvyGrowthComponent::HandleGardenSapChanged(float CurrentSap, float MaxSap)
-{
-	OnSapChanged.Broadcast(CurrentSap, MaxSap);
 }
 
 // ------------------------------------------------------------------ Initialization
@@ -221,19 +216,40 @@ void UIvyGrowthComponent::RestoreToSnapshot(int32 NumNodes, const TArray<int32>&
 
 // ------------------------------------------------------------------ Sap
 
-float UIvyGrowthComponent::GetSap() const
-{
-	return Garden ? Garden->GetSap() : 0.f;
-}
-
 float UIvyGrowthComponent::GetMaxSap() const
 {
-	return Garden ? Garden->GetMaxSap() : 0.f;
+	if (MaxSapOverride > 0.f)
+	{
+		return MaxSapOverride;
+	}
+	return Settings ? Settings->MaxSap : 0.f;
+}
+
+void UIvyGrowthComponent::SetSap(float NewSap)
+{
+	const float Clamped = FMath::Clamp(NewSap, 0.f, GetMaxSap());
+	if (FMath::IsNearlyEqual(Clamped, Sap))
+	{
+		return;
+	}
+	Sap = Clamped;
+	OnSapChanged.Broadcast(Sap, GetMaxSap());
+
+	// Forward to the garden, so the HUD can listen to every plant from one place
+	if (Garden)
+	{
+		Garden->NotifyPlantSapChanged(this);
+	}
+}
+
+void UIvyGrowthComponent::AddSap(float Amount)
+{
+	SetSap(Sap + Amount);
 }
 
 bool UIvyGrowthComponent::HasSapForStep() const
 {
-	return Settings && GetSap() >= Settings->SapCostPerStep;
+	return Settings && Sap >= Settings->SapCostPerStep;
 }
 
 float UIvyGrowthComponent::GetRemainingGrowthDistance() const
@@ -246,16 +262,8 @@ float UIvyGrowthComponent::GetRemainingGrowthDistance() const
 	{
 		return -1.f; // Free growth: no limit
 	}
-	const float Steps = FMath::FloorToFloat(GetSap() / Settings->SapCostPerStep);
+	const float Steps = FMath::FloorToFloat(Sap / Settings->SapCostPerStep);
 	return Steps * Settings->StepLength;
-}
-
-void UIvyGrowthComponent::AddSap(float Amount)
-{
-	if (Garden)
-	{
-		Garden->AddSap(Amount);
-	}
 }
 
 // ------------------------------------------------------------------ Light
@@ -760,10 +768,10 @@ void UIvyGrowthComponent::AddNode(const FIvyNode& From, const FVector& Location,
 	BranchTips[ActiveBranch] = NewIndex;
 	ActiveNode = NewIndex;
 
-	// Only steps in the dark consume the shared sap (the garden broadcasts the change)
-	if (!bLit && Garden)
+	// Only steps in the dark consume this plant's sap
+	if (!bLit)
 	{
-		Garden->ConsumeSap(Settings->SapCostPerStep);
+		SetSap(Sap - Settings->SapCostPerStep);
 	}
 	SetGrowingInLight(bLit);
 

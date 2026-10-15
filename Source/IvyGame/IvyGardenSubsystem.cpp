@@ -55,27 +55,15 @@ void UIvyGardenSubsystem::RegisterPlant(UIvyGrowthComponent* Plant)
 		Graph->AddPlant(Plant);
 	}
 
-	// The first plant with settings defines the shared sap budget of the level
-	if (const UIvyGrowthSettings* PlantSettings = Plant->Settings)
-	{
-		if (!bSapInitialized)
-		{
-			MaxSap = PlantSettings->MaxSap;
-			bSapInitialized = true;
-			SetSap(MaxSap);
-		}
-		else if (!FMath::IsNearlyEqual(MaxSap, PlantSettings->MaxSap))
-		{
-			UE_LOG(LogIvyGarden, Warning, TEXT("%s has a different MaxSap (%.0f). Sap is shared: the level keeps %.0f. Use the same Settings asset on every plant."),
-				*GetNameSafe(Plant->GetOwner()), PlantSettings->MaxSap, MaxSap);
-		}
-	}
-
 	// Until the player chooses, the default selection is the first plant in order
 	if (!bPlayerHasSelected)
 	{
 		SetSelected(Plants[0]);
 	}
+
+	// Let listeners show the starting sap of the new plant
+	NotifyPlantSapChanged(Plant);
+	OnGardenChanged.Broadcast();
 }
 
 void UIvyGardenSubsystem::UnregisterPlant(UIvyGrowthComponent* Plant)
@@ -169,9 +157,22 @@ void UIvyGardenSubsystem::SetSelected(UIvyGrowthComponent* Plant)
 	}
 	SelectedPlant = Plant;
 	OnSelectedPlantChanged.Broadcast(SelectedPlant);
+
+	// The "selected sap" changed too: simple HUDs bound to OnSapChanged stay correct
+	OnSapChanged.Broadcast(GetSap(), GetMaxSap());
 }
 
 // ------------------------------------------------------------------ Sap
+
+float UIvyGardenSubsystem::GetSap() const
+{
+	return SelectedPlant ? SelectedPlant->GetSap() : 0.f;
+}
+
+float UIvyGardenSubsystem::GetMaxSap() const
+{
+	return SelectedPlant ? SelectedPlant->GetMaxSap() : 0.f;
+}
 
 float UIvyGardenSubsystem::GetRemainingGrowthDistance() const
 {
@@ -180,18 +181,24 @@ float UIvyGardenSubsystem::GetRemainingGrowthDistance() const
 
 void UIvyGardenSubsystem::AddSap(float Amount)
 {
-	SetSap(Sap + Amount);
+	if (SelectedPlant)
+	{
+		SelectedPlant->AddSap(Amount);
+	}
 }
 
-void UIvyGardenSubsystem::ConsumeSap(float Amount)
+void UIvyGardenSubsystem::NotifyPlantSapChanged(UIvyGrowthComponent* Plant)
 {
-	SetSap(Sap - Amount);
-}
+	if (!Plant)
+	{
+		return;
+	}
+	OnPlantSapChanged.Broadcast(Plant, Plant->GetSap(), Plant->GetMaxSap());
 
-void UIvyGardenSubsystem::SetSap(float NewSap)
-{
-	Sap = FMath::Clamp(NewSap, 0.f, MaxSap);
-	OnSapChanged.Broadcast(Sap, MaxSap);
+	if (Plant == SelectedPlant)
+	{
+		OnSapChanged.Broadcast(Plant->GetSap(), Plant->GetMaxSap());
+	}
 }
 
 // ------------------------------------------------------------------ Light
@@ -247,14 +254,14 @@ bool UIvyGardenSubsystem::Undo()
 
 bool UIvyGardenSubsystem::HasChangedSince(const FIvyGardenSnapshot& Snapshot) const
 {
-	if (bGestureDirty || !FMath::IsNearlyEqual(Sap, Snapshot.Sap))
+	if (bGestureDirty)
 	{
 		return true;
 	}
 	for (const FIvyPlantSnapshot& PlantSnapshot : Snapshot.Plants)
 	{
 		const UIvyGrowthComponent* Plant = PlantSnapshot.Plant.Get();
-		if (Plant && Plant->GetNumNodes() != PlantSnapshot.NumNodes)
+		if (Plant && (Plant->GetNumNodes() != PlantSnapshot.NumNodes || !FMath::IsNearlyEqual(Plant->GetSap(), PlantSnapshot.Sap)))
 		{
 			return true;
 		}
@@ -265,7 +272,6 @@ bool UIvyGardenSubsystem::HasChangedSince(const FIvyGardenSnapshot& Snapshot) co
 FIvyGardenSnapshot UIvyGardenSubsystem::MakeSnapshot() const
 {
 	FIvyGardenSnapshot Snapshot;
-	Snapshot.Sap = Sap;
 
 	for (const TObjectPtr<UIvyGrowthComponent>& Plant : Plants)
 	{
@@ -275,6 +281,7 @@ FIvyGardenSnapshot UIvyGardenSubsystem::MakeSnapshot() const
 			PlantSnapshot.Plant = Plant;
 			PlantSnapshot.NumNodes = Plant->GetNumNodes();
 			PlantSnapshot.BranchTips = Plant->GetBranchTips();
+			PlantSnapshot.Sap = Plant->GetSap();
 		}
 	}
 
@@ -298,6 +305,7 @@ void UIvyGardenSubsystem::ApplySnapshot(const FIvyGardenSnapshot& Snapshot)
 		if (UIvyGrowthComponent* Plant = PlantSnapshot.Plant.Get())
 		{
 			Plant->RestoreToSnapshot(PlantSnapshot.NumNodes, PlantSnapshot.BranchTips);
+			Plant->SetSap(PlantSnapshot.Sap);
 		}
 	}
 
@@ -308,8 +316,6 @@ void UIvyGardenSubsystem::ApplySnapshot(const FIvyGardenSnapshot& Snapshot)
 			IIvyInteractable::Execute_IvyRestoreState(Actor, Record.State);
 		}
 	}
-
-	SetSap(Snapshot.Sap);
 }
 
 // ------------------------------------------------------------------ Queries

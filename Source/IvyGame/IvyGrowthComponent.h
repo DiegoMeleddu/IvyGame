@@ -15,8 +15,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnIvySapChanged, float, CurrentSap
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIvyLightGrowthChanged, bool, bGrowingInLight);
 
 /**
- * Owns the data of one ivy plant (nodes, branches) and the growth algorithm.
- * Sap and undo are shared by all plants and live in UIvyGardenSubsystem.
+ * Owns the data of one ivy plant (nodes, branches, its own sap) and the growth algorithm.
+ * Undo is global and lives in UIvyGardenSubsystem.
  * Knows nothing about rendering: other systems listen to its events.
  */
 UCLASS(ClassGroup = (Ivy), meta = (BlueprintSpawnableComponent))
@@ -33,6 +33,10 @@ public:
 	/** Lower values come first when the player cycles plants. The lowest is selected at start. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy")
 	int32 SelectionOrder = 0;
+
+	/** Sap budget of this plant. <= 0 uses Settings->MaxSap. Lets two plants in the same level have different budgets. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ivy|Sap", meta = (ClampMin = "0"))
+	float MaxSapOverride = 0.f;
 
 	// --- Obstacle avoidance ---
 	/** Number of recent steps used to measure progress toward the target. */
@@ -82,12 +86,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy")
 	bool IsGrowing() const { return bGestureActive; }
 
-	// --- Sap (shared by all plants, owned by the garden) ---
+	// --- Sap (owned by this plant) ---
 	UFUNCTION(BlueprintCallable, Category = "Ivy|Sap")
 	void AddSap(float Amount);
 
+	/** Clamps to [0, MaxSap] and broadcasts the change. Also used by the garden on undo. */
+	void SetSap(float NewSap);
+
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
-	float GetSap() const;
+	float GetSap() const { return Sap; }
 
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	float GetMaxSap() const;
@@ -95,7 +102,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	bool HasSapForStep() const;
 
-	/** Distance (cm) this plant can still grow with the shared sap. -1 = unlimited. */
+	/** Distance (cm) this plant can still grow with its own sap. -1 = unlimited. */
 	UFUNCTION(BlueprintPure, Category = "Ivy|Sap")
 	float GetRemainingGrowthDistance() const;
 
@@ -133,7 +140,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Ivy")
 	FOnIvyChanged OnIvyChanged;
 
-	/** Re-broadcast of the garden shared sap, so existing HUD bindings keep working. */
+	/** Sap of THIS plant changed. */
 	UPROPERTY(BlueprintAssignable, Category = "Ivy")
 	FOnIvySapChanged OnSapChanged;
 
@@ -145,9 +152,6 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	UFUNCTION()
-	void HandleGardenSapChanged(float CurrentSap, float MaxSap);
-
 	void GrowTick();
 	bool GrowStep();
 
@@ -184,6 +188,9 @@ private:
 	int32 ActiveNode = INDEX_NONE;
 	int32 ActiveBranch = INDEX_NONE;
 	FVector GrowTarget = FVector::ZeroVector;
+
+	// --- Sap ---
+	float Sap = 0.f;
 
 	// --- Steering state (per gesture, never saved) ---
 	FVector TrackedTarget = FVector::ZeroVector;
