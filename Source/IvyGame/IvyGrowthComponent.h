@@ -202,6 +202,9 @@ private:
 	bool bDetouring = false;
 	bool bDetourGaveUp = false;
 
+	/** Set by FindPlacement when this step pushed an object (or the object is still moving from a push). */
+	mutable bool bPushedThisStep = false;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UIvyLightSubsystem> LightSubsystem;
 

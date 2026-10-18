@@ -47,6 +47,12 @@ namespace
 		return ImplementsIvyInteractable(Actor) && IIvyInteractable::Execute_CanIvyClimb(Actor);
 	}
 
+	/** Push direction: away from the touched face, kept horizontal. Zero when the face is a top or bottom face. */
+	FVector ComputePushDirection(const FHitResult& Hit)
+	{
+		return FVector::VectorPlaneProject(-Hit.ImpactNormal, FVector::UpVector).GetSafeNormal();
+	}
+
 	bool IsIvyDebugOn()
 	{
 		return CVarIvyDebug.GetValueOnGameThread() > 0;
@@ -389,6 +395,8 @@ bool UIvyGrowthComponent::GrowStep()
 		return false;
 	}
 
+	bPushedThisStep = false;
+
 	const FIvyNode From = Nodes[ActiveNode]; // Copy by value: adding to the array may reallocate it
 
 	const FVector ToTarget = GrowTarget - From.Location;
@@ -475,6 +483,14 @@ bool UIvyGrowthComponent::GrowStep()
 	FVector NewLocation, NewNormal;
 	if (!FindPlacement(From, Dir, NewLocation, NewNormal, /*bAllowInteraction*/ true))
 	{
+		if (bPushedThisStep)
+		{
+			// Pushing is progress: keep pushing and follow the object, never start or continue a detour
+			RecentDistances.Reset();
+			bDetouring = false;
+			return false;
+		}
+
 		if (!bDetouring)
 		{
 			return false; // Counts as no progress: a detour starts once the window shows it
@@ -684,6 +700,7 @@ void UIvyGrowthComponent::ResetSteering()
 	StepsSinceReplan = 0;
 	bDetouring = false;
 	bDetourGaveUp = false;
+	bPushedThisStep = false;
 }
 
 // ------------------------------------------------------------------ Placement
@@ -709,8 +726,21 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 			{
 				return false;
 			}
-			if (IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
+
+			// The object moves away from the touched face, like pushed by a hand (stable, no wander)
+			const FVector PushDir = ComputePushDirection(Hit);
+
+#if ENABLE_DRAW_DEBUG
+			if (IsIvyDebugOn())
 			{
+				DrawDebugDirectionalArrow(GetWorld(), Hit.ImpactPoint, Hit.ImpactPoint + PushDir * 40.f, 10.f, FColor::Purple, false, 1.f, 0, 1.5f);
+			}
+#endif
+
+			// True = pushed now or still moving from a previous push
+			if (IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, PushDir))
+			{
+				bPushedThisStep = true;
 				if (Garden)
 				{
 					Garden->MarkGestureDirty(); // The level changed without growing
