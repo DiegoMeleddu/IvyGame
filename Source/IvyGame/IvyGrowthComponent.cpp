@@ -41,6 +41,12 @@ namespace
 		return Actor && Actor->GetClass()->ImplementsInterface(UIvyInteractable::StaticClass());
 	}
 
+	/** True if the actor is an interactable object that currently accepts the ivy on its surface. */
+	bool IsClimbableInteractable(AActor* Actor)
+	{
+		return ImplementsIvyInteractable(Actor) && IIvyInteractable::Execute_CanIvyClimb(Actor);
+	}
+
 	bool IsIvyDebugOn()
 	{
 		return CVarIvyDebug.GetValueOnGameThread() > 0;
@@ -333,9 +339,14 @@ bool UIvyGrowthComponent::IsClimbable(const FHitResult& Hit)
 	{
 		return false;
 	}
-	if (const AActor* Actor = Hit.GetActor())
+	if (AActor* Actor = Hit.GetActor())
 	{
-		if (Actor->ActorHasTag(NoIvyTag) || ImplementsIvyInteractable(Actor))
+		if (Actor->ActorHasTag(NoIvyTag))
+		{
+			return false;
+		}
+		// Interactable objects are walls unless they say otherwise (e.g. a pushable blocked by a step)
+		if (ImplementsIvyInteractable(Actor) && !IsClimbableInteractable(Actor))
 		{
 			return false;
 		}
@@ -691,17 +702,32 @@ bool UIvyGrowthComponent::FindPlacement(const FIvyNode& From, const FVector& Dir
 	if (TraceIvy(P, P + Dir * Step, Hit))
 	{
 		AActor* HitActor = Hit.GetActor();
-		if (ImplementsIvyInteractable(HitActor))
+		if (ImplementsIvyInteractable(HitActor) && !IsClimbableInteractable(HitActor))
 		{
-			// Pushing objects always requires sap, even in the light. Dry runs never push.
-			if (bAllowInteraction && HasSapForStep() && IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
+			// Push first: pushing always requires sap, even in the light. Dry runs never push.
+			if (!bAllowInteraction || !HasSapForStep())
+			{
+				return false;
+			}
+			if (IIvyInteractable::Execute_OnIvyBlocked(HitActor, Hit.ImpactPoint, Dir))
 			{
 				if (Garden)
 				{
 					Garden->MarkGestureDirty(); // The level changed without growing
 				}
+				return false;
 			}
-			return false;
+
+			// The push failed: the object may now accept the ivy (e.g. a crate stopped by a step)
+			if (!IsClimbableInteractable(HitActor))
+			{
+				return false;
+			}
+			if (Garden)
+			{
+				Garden->MarkGestureDirty(); // The object changed state (now climbable)
+			}
+			// Fall through: grow onto the object in this same step
 		}
 		if (!IsClimbable(Hit))
 		{
